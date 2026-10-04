@@ -1,0 +1,58 @@
+{
+  "name": "dsh-extra-prompt",
+  "version": "0.1.0",
+  "description": "Prompt injection, subagent routing, skill guide, skill installer and rtk output compaction for DSH, with a settings page in the Web UI",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./prompt-injection": "./src/prompt-injection/index.mjs",
+    "./subagent-routing": "./src/subagent-routing/index.mjs",
+    "./skill-guide": "./src/skill-guide/index.mjs",
+    "./skill-installer": "./src/skill-installer/index.mjs",
+    "./rtk-compact": "./src/rtk-compact/index.mjs",
+    "./mcp": "./src/mcp/index.mjs",
+    "./session-dashboard": "./src/session-dashboard/index.mjs",
+    "./settings-api": "./src/settings-api/index.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-mcp-client": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-mcp-client": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "keywords": [
+    "dsh",
+    "cordis",
+    "plugin"
+  ]
+}

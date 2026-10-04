@@ -1,0 +1,51 @@
+# dsh-extra-prompt — the rows this package contributes to a profile.
+#
+# Every row id doubles as its settings namespace and as the exported plugin
+# `name`, which is the DSH convention and is what lets the Web UI settings page
+# address each namespace by id.
+#
+# The first row is mounted from the BARE package name on purpose: `client-modules`
+# attaches a package's browser half to the row whose specifier is the bare package
+# name, and a row mounted from a subpath export never carries a half. The five rows
+# after it are host-only, split from each other because their Cordis `inject` sets
+# differ — one plugin could not serve all five:
+#
+#   extra-prompt-injection        no inject (prompt assembly only)
+#   extra-subagent-routing        settings, systemPrompt
+#   extra-skill-guide             skills
+#   extra-skill-installer         tools
+#   extra-rtk-compact             subprocess, timer
+#   extra-mcp                     tools
+#
+# The last row is the settings page's data channel. It has no settings namespace
+# of its own and its id is not one: it exists to answer the page, and it is separate
+# because `inject: ['connection']` never settles on a host without a web transport —
+# a feature row must not wait on that.
+#
+# Disabling any single row is the supported coarse switch for that feature; the
+# settings page is the fine-grained one.
+
+- insert:
+    - id: extra-prompt
+      name: 'dsh-extra-prompt'
+
+    - id: extra-prompt-injection
+      name: 'dsh-extra-prompt/prompt-injection'
+
+    - id: extra-subagent-routing
+      name: 'dsh-extra-prompt/subagent-routing'
+
+    - id: extra-skill-guide
+      name: 'dsh-extra-prompt/skill-guide'
+
+    - id: extra-skill-installer
+      name: 'dsh-extra-prompt/skill-installer'
+
+    - id: extra-rtk-compact
+      name: 'dsh-extra-prompt/rtk-compact'
+
+    - id: extra-mcp
+      name: 'dsh-extra-prompt/mcp'
+
+    - id: extra-settings-api
+      name: 'dsh-extra-prompt/settings-api'
