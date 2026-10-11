@@ -325,7 +325,7 @@ function createKit() {
 // --- the loader + service doubles -------------------------------------------
 
 /** A `document` double, so the stylesheet path runs and can be inspected. */
-function makeDocument() {
+function makeDocument(dom) {
   const appended = []
   const head = { appendChild: (element) => { appended.push(element) } }
   return {
@@ -334,6 +334,8 @@ function makeDocument() {
       head,
       getElementById: (id) => appended.find(element => element.id === id) ?? null,
       createElement: (tag) => ({ tag, id: '', textContent: '' }),
+      querySelector: (selector) => (dom && typeof dom.querySelector === 'function' ? dom.querySelector(selector) : null),
+      querySelectorAll: (selector) => (dom && typeof dom.querySelectorAll === 'function' ? dom.querySelectorAll(selector) : []),
     },
   }
 }
@@ -362,13 +364,13 @@ function settingsFetch(url, init) {
 }
 
 /** Load the real artifact and return its registration. */
-async function loadBundle() {
+async function loadBundle(options = {}) {
   const source = await readFile(BUNDLE, 'utf8')
   const registrations = []
   const requested = []
   const kit = createKit()
   const React = createReact()
-  const { document, appended } = makeDocument()
+  const { document, appended } = makeDocument(options.dom)
   apiAnswers = new Map()
   apiRequests = []
   const sandbox = {
@@ -482,8 +484,8 @@ function makeContext(values, options = {}) {
  * @param options - form status/writability/base/user overrides per namespace.
  * @param settings - `declare: false` leaves the `slots.inject` wait unresolved.
  */
-async function boot(values, options, settings) {
-  const { registration, plugin, requested, appended } = await loadBundle()
+async function boot(values, options, settings, bundleOptions) {
+  const { registration, plugin, requested, appended } = await loadBundle(bundleOptions)
   const harness = makeContext(values === undefined ? {} : values, options)
   plugin.apply(harness.context)
   if (settings === undefined || settings.declare !== false) {
@@ -1247,6 +1249,98 @@ test('registers conversation.view slot for in-session dashboard tab', async () =
   assert.ok(rendered)
   assert.ok(rendered.props.className.includes('dsh-dash-session-view'))
   assert.equal(rendered.props['data-conversation-composer-overlay'], '')
+})
+
+test('conversation dashboard detects active model from DOM composer and rejects header team labels', async () => {
+  const headerMenuBtn = {
+    tagName: 'BUTTON',
+    className: 'header-mode-trigger',
+    title: '👥 智能体团队',
+    attributes: { 'aria-haspopup': 'menu', title: '👥 智能体团队' },
+    textContent: '👥 智能体团队',
+    children: [],
+  }
+
+  const triggerLabelSpan = {
+    tagName: 'SPAN',
+    className: 'wq12jW_triggerLabel',
+    attributes: { class: 'wq12jW_triggerLabel' },
+    textContent: 'gemini-3.8-flash-high',
+    children: [],
+  }
+
+  const composer = {
+    tagName: 'DIV',
+    className: 'standardControls composer',
+    attributes: { class: 'standardControls composer' },
+    textContent: 'gemini-3.8-flash-high',
+    children: [triggerLabelSpan],
+    querySelector: (sel) => (sel.includes('triggerLabel') ? triggerLabelSpan : null),
+    querySelectorAll: (sel) => (sel.includes('span') ? [triggerLabelSpan] : []),
+  }
+
+  const dom = {
+    querySelector: (sel) => {
+      if (sel.includes('composer') || sel.includes('standardControls') || sel.includes('InputBar') || sel.includes('footer')) {
+        return composer
+      }
+      return null
+    },
+    querySelectorAll: (sel) => {
+      if (sel.includes('aria-haspopup="menu"')) return [headerMenuBtn]
+      return []
+    },
+  }
+
+  const { registered, plugin } = await boot(undefined, undefined, undefined, { dom })
+
+  // 1. Assert isLikelyModelName rejects '智能体团队' and variants, but accepts 'gemini-3.8-flash-high'
+  assert.equal(plugin.isLikelyModelName('智能体团队'), false)
+  assert.equal(plugin.isLikelyModelName('👥 智能体团队'), false)
+  assert.equal(plugin.isLikelyModelName('标准模式'), false)
+  assert.equal(plugin.isLikelyModelName('当前模型'), false)
+  assert.equal(plugin.isLikelyModelName('gemini-3.8-flash-high'), true)
+
+  apiAnswers.set('dashboard/data', {
+    ok: true,
+    value: {
+      session: { id: 'sess-dom-test', title: 'DOM 回退会话' },
+      summary: { turns: 1, steps: 1, elapsedMs: 10000 },
+      stats: {},
+      context: { capacity: {} },
+      token: {
+        totals: { inputTokens: 5000, outputTokens: 1000, totalTokens: 6000 },
+        points: [{ key: '1', label: '第 1 轮', inputTokens: 5000, outputTokens: 1000, totalTokens: 6000 }],
+      },
+      cost: { toolCalls: 0, tools: [] },
+      turns: [{ key: 't1', turn: 1, label: '第 1 轮', durationMs: 10000, steps: 1, toolCalls: 0, totalTokens: 6000, signals: ['user', 'assistant'] }],
+    },
+  })
+
+  // 2. Call WITHOUT passing sessionModel so it exercises DOM fallback
+  const simulatedSession = { sessionId: 'sess-dom-test', title: 'DOM 回退会话' }
+  renderConversationDashboard(registered, {
+    sessionId: 'sess-dom-test',
+    useSession: (selector) => selector(simulatedSession),
+  })
+  await settle()
+  await settle()
+  const page = renderConversationDashboard(registered, {
+    sessionId: 'sess-dom-test',
+    useSession: (selector) => selector(simulatedSession),
+  })
+  const content = textOf(page)
+
+  // 3. Assert user sees 'gemini-3.8-flash-high · 1.00M 上限'
+  assert.ok(
+    content.includes('gemini-3.8-flash-high · 1.00M 上限'),
+    `User must see "gemini-3.8-flash-high · 1.00M 上限". Got:\n${content.slice(0, 300)}`
+  )
+
+  // 4. Assert it NEVER shows '智能体团队 · 131.1k 上限'
+  assert.ok(!content.includes('智能体团队 · 131.1k 上限'))
+  assert.ok(!content.includes('智能体团队'))
+  assert.ok(!content.includes('131.1k 上限'))
 })
 
 test('marks a field the user layer overrides, and the reset stages a clear', async () => {
