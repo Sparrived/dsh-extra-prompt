@@ -650,7 +650,7 @@ export function resolveModelWindowTokens(modelName, customWindow) {
   if (norm.includes('claude-3') || norm.includes('claude-3-5') || norm.includes('claude-3.5') || norm.includes('claude-sonnet') || norm.includes('claude-opus')) {
     return 200_000;
   }
-  if (norm.includes('gemini-1.5') || norm.includes('gemini-2') || norm.includes('gemini-pro')) {
+  if (norm.includes('gemini')) {
     return 1_000_000;
   }
   if (norm.includes('gpt-4o') || norm.includes('o1') || norm.includes('o3') || norm.includes('gpt-4-turbo')) {
@@ -672,7 +672,33 @@ export function resolveModelWindowTokens(modelName, customWindow) {
 export function sessionContextInsight(entries, stats = {}, options = {}) {
   const ordered = [...entries].sort((a, b) => ((a.event?.seq ?? a.seq ?? 0) - (b.event?.seq ?? b.seq ?? 0)));
   const header = options.header || {};
-  const modelName = header.modelConfig?.model || header.model || stats.model || stats.modelId || 'DeepSeek-V3';
+  let detectedModel = options.model
+    || header.modelConfig?.model
+    || header.model
+    || header.agentConfig?.model
+    || stats.model
+    || stats.modelId
+    || options.projections?.values?.modelSelection?.lastUsed?.model
+    || options.projections?.values?.modelSelection?.next?.model;
+
+  for (const item of ordered) {
+    const event = item?.event || item;
+    if (event.type === 'request/header') {
+      const m = event.data?.header?.config?.model;
+      if (m) detectedModel = m;
+    }
+    if (event.type === 'model/selection') {
+      const m = event.data?.model;
+      if (m) detectedModel = m;
+    }
+    if (event.type === 'assistant/message') {
+      const data = recordValue(event.data) ?? {};
+      const m = data.model || data.usage?.model;
+      if (m) detectedModel = m;
+    }
+  }
+
+  const modelName = detectedModel || '当前模型';
   const maxWindowTokens = resolveModelWindowTokens(modelName, stats.contextWindow ?? stats.maxTokens);
 
   let latestInputTokens = 0;
@@ -1225,9 +1251,19 @@ export async function readSessionDashboardFromHost(ctx, requestedSessionId) {
   const tokenUsage = projections?.values?.tokenUsage ?? {};
   const mergedStats = { ...sessionStats, ...tokenUsage };
 
+  const projModel = projections?.values?.modelSelection?.lastUsed?.model
+    || projections?.values?.modelSelection?.next?.model;
+  const sessionModel = projModel
+    || header.model
+    || header.modelConfig?.model
+    || mergedStats.model
+    || mergedStats.modelId
+    || undefined;
+
   const data = sessionDashboard(events, mergedStats, 'zh', {
     header,
     projections,
+    model: sessionModel,
   });
 
   const projectedTitle = projections?.values?.title;
@@ -1251,6 +1287,7 @@ export async function readSessionDashboardFromHost(ctx, requestedSessionId) {
     session: {
       id: sessionId,
       title: sessionTitle,
+      model: sessionModel || data.context?.capacity?.model,
       cwd: header.cwd || '',
       createdAt: header.createdAt || header.time,
       updatedAt: header.updatedAt || data.summary.lastEventTime,

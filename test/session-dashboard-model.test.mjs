@@ -341,6 +341,7 @@ test('resolveModelWindowTokens: resolves correct window limits', () => {
   assert.equal(resolveModelWindowTokens('deepseek-v3'), 131072);
   assert.equal(resolveModelWindowTokens('claude-3-5-sonnet'), 200000);
   assert.equal(resolveModelWindowTokens('gemini-1.5-pro'), 1000000);
+  assert.equal(resolveModelWindowTokens('gemini-3.8-flash-high'), 1000000);
   assert.equal(resolveModelWindowTokens('gpt-4o'), 128000);
   assert.equal(resolveModelWindowTokens('custom-model', 65536), 65536);
 });
