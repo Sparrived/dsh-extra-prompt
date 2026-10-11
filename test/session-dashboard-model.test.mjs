@@ -17,6 +17,8 @@ import {
   eventToolResultError,
   readSessionDashboardFromHost,
   listSessionsFromHost,
+  resolveModelWindowTokens,
+  sessionContextInsight,
 } from '../src/session-dashboard/model.mjs';
 
 test('sessionDashboard: handles empty entries gracefully', () => {
@@ -303,6 +305,8 @@ test('readSessionDashboardFromHost: resolves session data via sessionQuery', asy
   assert.equal(data.session.title, 'Test Session');
   assert.equal(data.summary.eventCount, 3);
   assert.equal(data.token.totals.totalTokens, 600);
+  assert.ok(data.context, 'must include context insight');
+  assert.equal(data.context.capacity.currentContextTokens, 500);
 });
 
 test('listSessionsFromHost: returns distinct sessions', async () => {
@@ -332,3 +336,168 @@ test('listSessionsFromHost: returns distinct sessions', async () => {
   assert.equal(list[0].id, 'sess-1');
   assert.equal(list[1].id, 'sess-2');
 });
+
+test('resolveModelWindowTokens: resolves correct window limits', () => {
+  assert.equal(resolveModelWindowTokens('deepseek-v3'), 131072);
+  assert.equal(resolveModelWindowTokens('claude-3-5-sonnet'), 200000);
+  assert.equal(resolveModelWindowTokens('gemini-1.5-pro'), 1000000);
+  assert.equal(resolveModelWindowTokens('gpt-4o'), 128000);
+  assert.equal(resolveModelWindowTokens('custom-model', 65536), 65536);
+});
+
+test('sessionContextInsight: extracts capacity, composition slices, lifecycle events, and synergy', () => {
+  const entries = [
+    { event: { seq: 1, time: 1000, type: 'turn/start', data: { turn: 1 } } },
+    {
+      event: {
+        seq: 2,
+        time: 1100,
+        type: 'user/message',
+        data: {
+          turn: 1,
+          source: { kind: 'extra-prompt-injection' },
+          message: { content: 'System injection: obey coding guidelines' },
+        },
+      },
+    },
+    {
+      event: {
+        seq: 3,
+        time: 1150,
+        type: 'user/message',
+        data: {
+          turn: 1,
+          source: { kind: 'skill' },
+          message: { content: '<skill_content>office-docx instructions</skill_content>' },
+        },
+      },
+    },
+    {
+      event: {
+        seq: 4,
+        time: 1200,
+        type: 'user/message',
+        data: {
+          turn: 1,
+          source: { kind: 'user' },
+          message: { content: 'Please create document and run git' },
+        },
+      },
+    },
+    {
+      event: {
+        seq: 5,
+        time: 1300,
+        type: 'tool/call',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'call-1',
+          name: 'pwsh',
+          arguments: { command: 'git status' },
+        },
+      },
+    },
+    {
+      event: {
+        seq: 6,
+        time: 1400,
+        type: 'tool/call',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'call-2',
+          name: 'mcp_postgres__query',
+          arguments: { sql: 'SELECT 1' },
+        },
+      },
+    },
+    {
+      event: {
+        seq: 7,
+        time: 1500,
+        type: 'tool/result',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'call-1',
+          name: 'pwsh',
+          content: 'git status output [truncated]...',
+          truncated: true,
+        },
+      },
+    },
+    {
+      event: {
+        seq: 8,
+        time: 1600,
+        type: 'assistant/message',
+        data: {
+          turn: 1,
+          step: 1,
+          usage: {
+            inputTokens: 52000,
+            outputTokens: 1200,
+            cacheReadTokens: 40000,
+            uncachedInputTokens: 12000,
+          },
+        },
+      },
+    },
+    // Turn 2 with compaction: inputTokens drops from 52000 to 18000
+    { event: { seq: 9, time: 2000, type: 'turn/start', data: { turn: 2 } } },
+    {
+      event: {
+        seq: 10,
+        time: 2100,
+        type: 'assistant/message',
+        data: {
+          turn: 2,
+          step: 1,
+          usage: {
+            inputTokens: 18000,
+            outputTokens: 800,
+            cacheReadTokens: 14000,
+            uncachedInputTokens: 4000,
+          },
+        },
+      },
+    },
+    { event: { seq: 11, time: 2200, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } } },
+  ];
+
+  const insight = sessionContextInsight(entries, { model: 'deepseek-v3' });
+
+  // Capacity check
+  assert.equal(insight.capacity.model, 'deepseek-v3');
+  assert.equal(insight.capacity.maxWindowTokens, 131072);
+  assert.equal(insight.capacity.currentContextTokens, 18000);
+  assert.equal(insight.capacity.safetyStatus, 'safe');
+  assert.ok(insight.capacity.remainingTokens > 100000);
+
+  // Composition check
+  assert.ok(Array.isArray(insight.composition.slices));
+  assert.ok(insight.composition.slices.length >= 3);
+  assert.ok(insight.composition.slices.some((s) => s.key === 'toolSchema'));
+  assert.ok(insight.composition.slices.some((s) => s.key === 'injected'));
+  assert.ok(insight.composition.slices.some((s) => s.key === 'skills'));
+
+  // Events check: compaction, injection, pruning
+  assert.ok(insight.events.length >= 3);
+  const compactEvent = insight.events.find((e) => e.kind === 'compact');
+  assert.ok(compactEvent, 'must detect compaction event');
+  assert.equal(compactEvent.deltaTokens, -34000); // 52000 - 18000
+
+  const injectEvents = insight.events.filter((e) => e.kind === 'inject');
+  assert.ok(injectEvents.length >= 2, 'must detect prompt & skill injections');
+
+  const pruneEvent = insight.events.find((e) => e.kind === 'prune');
+  assert.ok(pruneEvent, 'must detect prune/truncation event');
+
+  // Synergy check
+  assert.equal(insight.synergy.mcpToolsCount, 1);
+  assert.equal(insight.synergy.skillsLoadedCount, 1);
+  assert.equal(insight.synergy.promptInjectionsCount, 1);
+  assert.ok(insight.synergy.rtkSavingsTokens >= 0);
+});
+

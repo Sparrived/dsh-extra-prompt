@@ -637,6 +637,367 @@ export function sessionCost(entries) {
 }
 
 /**
+ * Map model name or config to standard context window size in tokens.
+ * @param {string | undefined} modelName
+ * @param {number | undefined} [customWindow]
+ * @returns {number}
+ */
+export function resolveModelWindowTokens(modelName, customWindow) {
+  if (customWindow !== undefined && Number.isFinite(customWindow) && customWindow > 0) {
+    return Math.round(customWindow);
+  }
+  const norm = String(modelName || '').toLowerCase().trim();
+  if (norm.includes('claude-3') || norm.includes('claude-3-5') || norm.includes('claude-3.5') || norm.includes('claude-sonnet') || norm.includes('claude-opus')) {
+    return 200_000;
+  }
+  if (norm.includes('gemini-1.5') || norm.includes('gemini-2') || norm.includes('gemini-pro')) {
+    return 1_000_000;
+  }
+  if (norm.includes('gpt-4o') || norm.includes('o1') || norm.includes('o3') || norm.includes('gpt-4-turbo')) {
+    return 128_000;
+  }
+  if (norm.includes('deepseek') || norm.includes('qwen') || norm.includes('glm') || norm.includes('yi')) {
+    return 131_072;
+  }
+  return 131_072;
+}
+
+/**
+ * Deep context window insight, composition breakdown, lifecycle events, and synergy metrics.
+ * @param {any[]} entries
+ * @param {Record<string, any>} [stats]
+ * @param {{ header?: any; projections?: any; now?: number }} [options]
+ * @returns {Record<string, any>}
+ */
+export function sessionContextInsight(entries, stats = {}, options = {}) {
+  const ordered = [...entries].sort((a, b) => ((a.event?.seq ?? a.seq ?? 0) - (b.event?.seq ?? b.seq ?? 0)));
+  const header = options.header || {};
+  const modelName = header.modelConfig?.model || header.model || stats.model || stats.modelId || 'DeepSeek-V3';
+  const maxWindowTokens = resolveModelWindowTokens(modelName, stats.contextWindow ?? stats.maxTokens);
+
+  let latestInputTokens = 0;
+  let userChars = 0;
+  let assistantChars = 0;
+  let toolResultCharsSum = 0;
+  let injectedChars = 0;
+  let skillChars = 0;
+  let promptInjectionCount = 0;
+  let skillCount = 0;
+  const distinctTools = new Set();
+  const mcpTools = new Set();
+  const events = [];
+  const historyTrend = [];
+
+  let previousInputTokens = 0;
+
+  for (const item of ordered) {
+    const event = item?.event || item;
+    const data = recordValue(event.data) ?? {};
+    const message = recordValue(data.message);
+    const turn = eventTurn(item);
+    const step = eventStep(item);
+    const time = numberValue(event.time);
+
+    // Track tools
+    if (event.type === 'tool/call') {
+      const toolName = eventToolName(event);
+      distinctTools.add(toolName);
+      if (toolName.startsWith('mcp_') || toolName.startsWith('mcp:') || toolName.includes('__mcp')) {
+        mcpTools.add(toolName);
+      }
+    }
+
+    // Track tool results & pruning
+    if (event.type === 'tool/result') {
+      const chars = toolResultChars(item);
+      toolResultCharsSum += chars;
+      const toolName = eventToolName(event);
+      const isTruncated = data.truncated === true
+        || (typeof data.content === 'string' && data.content.includes('[truncated]'))
+        || (typeof message?.content === 'string' && message.content.includes('[truncated]'))
+        || chars > 16000;
+      if (isTruncated) {
+        events.push({
+          seq: event.seq,
+          turn,
+          step,
+          time,
+          kind: 'prune',
+          title: `工具 [${toolName}] 输出剪枝`,
+          badge: '✂ 剪枝',
+          deltaTokens: -Math.round((chars * 0.4) / 3.5),
+          details: `截断超长返回 (${formatMetricVolume(chars)})，避免冲垮上下文`,
+        });
+      }
+    }
+
+    // Track user / injected messages
+    if (event.type === 'user/message') {
+      const content = typeof message?.content === 'string'
+        ? message.content
+        : Array.isArray(message?.content)
+          ? message.content.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('')
+          : typeof data.content === 'string' ? data.content : '';
+      const chars = content.length;
+
+      if (isInjectedMessage(event)) {
+        const source = recordValue(data.source) ?? recordValue(message?.source);
+        const sourceKind = typeof source?.kind === 'string' ? source.kind.toLowerCase() : '';
+        const isSkill = sourceKind === 'skill' || content.includes('<skill_content>') || content.includes('skills/');
+
+        if (isSkill) {
+          skillChars += chars;
+          skillCount += 1;
+          events.push({
+            seq: event.seq,
+            turn,
+            step,
+            time,
+            kind: 'inject',
+            title: '技能定义注入 (Skill)',
+            badge: '💉 技能',
+            deltaTokens: Math.max(1, Math.round(chars / 3.5)),
+            details: `加载外部技能规范 (~${formatTokens(Math.round(chars / 3.5))} Tokens)`,
+          });
+        } else {
+          injectedChars += chars;
+          promptInjectionCount += 1;
+          events.push({
+            seq: event.seq,
+            turn,
+            step,
+            time,
+            kind: 'inject',
+            title: '额外提示词规则注入',
+            badge: '💉 注入',
+            deltaTokens: Math.max(1, Math.round(chars / 3.5)),
+            details: `注入提示词/环境上下文 (~${formatTokens(Math.round(chars / 3.5))} Tokens)`,
+          });
+        }
+      } else {
+        userChars += chars;
+      }
+    }
+
+    // Track compaction explicit events
+    if (event.type === 'context/compact' || event.type === 'session/compact' || event.type === 'compact') {
+      const before = numberValue(data.beforeTokens) ?? previousInputTokens;
+      const after = numberValue(data.afterTokens) ?? 0;
+      const reclaimed = Math.max(0, before - after);
+      events.push({
+        seq: event.seq,
+        turn,
+        step,
+        time,
+        kind: 'compact',
+        title: `第 ${turn ?? '?'} 轮 上下文自动压缩`,
+        badge: '✂ 压缩',
+        deltaTokens: -reclaimed,
+        details: reclaimed > 0 ? `释放了 ${formatTokens(reclaimed)} Tokens` : '历史消息浓缩为记忆摘要',
+      });
+    }
+
+    // Track assistant message & inputTokens evolution
+    if (event.type === 'assistant/message') {
+      const usage = recordValue(data.usage) ?? recordValue(message?.usage) ?? {};
+      const inputTokens = numberValue(usage.inputTokens) ?? numberValue(usage.input_tokens) ?? 0;
+      const outputTokens = numberValue(usage.outputTokens) ?? numberValue(usage.output_tokens) ?? 0;
+      const reasoningTokens = numberValue(usage.reasoningTokens) ?? numberValue(usage.reasoning_tokens) ?? 0;
+      const cacheReadTokens = numberValue(usage.cacheReadTokens) ?? numberValue(usage.cache_read_tokens) ?? 0;
+      const uncachedInputTokens = numberValue(usage.uncachedInputTokens) ?? numberValue(usage.uncached_input_tokens) ?? 0;
+      const cacheWriteTokens = numberValue(usage.cacheWriteTokens) ?? numberValue(usage.cache_write_tokens) ?? 0;
+      const denom = uncachedInputTokens + cacheReadTokens + cacheWriteTokens;
+      const cacheHitRate = denom > 0 ? (cacheReadTokens / denom) * 100 : 0;
+
+      const content = typeof message?.content === 'string'
+        ? message.content
+        : Array.isArray(message?.content)
+          ? message.content.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('')
+          : '';
+      assistantChars += content.length;
+
+      // Detect heuristic compaction between assistant messages
+      const stepMarkers = [];
+      if (previousInputTokens >= 4000 && inputTokens < previousInputTokens && (previousInputTokens - inputTokens) >= 1500) {
+        const reclaimed = previousInputTokens - inputTokens;
+        const ratio = Math.round((reclaimed / previousInputTokens) * 100);
+        stepMarkers.push('compact');
+        events.push({
+          seq: event.seq,
+          turn,
+          step,
+          time,
+          kind: 'compact',
+          title: `第 ${turn ?? '?'} 轮 上下文自动压缩`,
+          badge: '✂ 压缩',
+          deltaTokens: -reclaimed,
+          details: `触发上下文压缩，释放了 ${formatTokens(reclaimed)} Tokens (-${ratio}%)`,
+        });
+      }
+
+      if (inputTokens > 0) {
+        latestInputTokens = inputTokens;
+      }
+
+      const delta = previousInputTokens > 0 ? inputTokens - previousInputTokens : inputTokens;
+      historyTrend.push({
+        turn,
+        step,
+        time,
+        contextTokens: inputTokens,
+        outputTokens,
+        reasoningTokens,
+        deltaTokens: delta,
+        cacheHitRate,
+        markers: stepMarkers,
+      });
+
+      previousInputTokens = inputTokens;
+    }
+  }
+
+  // Calculate current context tokens
+  const estimatedInitial = Math.round((userChars + injectedChars + skillChars) / 3.5) + (distinctTools.size * 180) + 1800;
+  const currentContextTokens = latestInputTokens > 0
+    ? latestInputTokens
+    : (ordered.length > 0 ? Math.min(maxWindowTokens, estimatedInitial) : 0);
+
+  const usagePercent = tokenUsagePercent(currentContextTokens, maxWindowTokens);
+  const remainingTokens = Math.max(0, maxWindowTokens - currentContextTokens);
+  const safetyStatus = usagePercent >= 85 ? 'critical' : usagePercent >= 70 ? 'warning' : 'safe';
+
+  // Calculate context composition slices
+  const compEvents = events.filter((e) => e.kind === 'compact');
+  const hasCompaction = compEvents.length > 0;
+
+  // 1. Tool schemas
+  const mcpToolCount = mcpTools.size;
+  const nativeToolCount = Math.max(0, distinctTools.size - mcpToolCount);
+  const toolSchemaTokens = currentContextTokens > 0 ? (nativeToolCount * 180 + mcpToolCount * 260) : 0;
+
+  // 2. Injected tokens
+  const injectedTokens = Math.round(injectedChars / 3.5);
+  const skillTokens = Math.round(skillChars / 3.5);
+
+  // 3. System base prompt
+  const systemTokens = currentContextTokens > 0 ? Math.min(2200, Math.max(800, Math.round(currentContextTokens * 0.08))) : 0;
+
+  // 4. Compacted summary
+  const compactedTokens = hasCompaction ? Math.min(3000, Math.max(800, Math.round(currentContextTokens * 0.15))) : 0;
+
+  // 5. Dialogue & Tool results
+  const allocatedBase = systemTokens + toolSchemaTokens + injectedTokens + skillTokens + compactedTokens;
+  const remainingForDialogue = Math.max(0, currentContextTokens - allocatedBase);
+
+  const estUserTokens = Math.round(userChars / 3.5);
+  const estAssistantTokens = Math.round(assistantChars / 3.5);
+  const estToolResultTokens = Math.round(toolResultCharsSum / 3.5);
+  const estDynamicSum = Math.max(1, estUserTokens + estAssistantTokens + estToolResultTokens);
+
+  const dialogueTokens = currentContextTokens > 0
+    ? Math.round(remainingForDialogue * ((estUserTokens + estAssistantTokens) / estDynamicSum))
+    : 0;
+  const toolResultTokens = currentContextTokens > 0
+    ? Math.max(0, remainingForDialogue - dialogueTokens)
+    : 0;
+
+  const rawSlices = [
+    {
+      key: 'system',
+      label: '系统预设指令',
+      tokens: systemTokens,
+      color: 'var(--dsw-alias-brand-primary, rgb(99, 102, 241))',
+      desc: '宿主环境与工作区基础引导规范 (System Prompt)',
+    },
+    {
+      key: 'toolSchema',
+      label: '工具与MCP定义',
+      tokens: toolSchemaTokens,
+      color: 'var(--dsw-alias-state-info-primary, rgb(14, 165, 233))',
+      desc: `${distinctTools.size} 个工具的参数 JSON Schema 定义与接口描述${mcpToolCount > 0 ? ` (含 ${mcpToolCount} 个 MCP 外部工具)` : ''}`,
+    },
+    {
+      key: 'injected',
+      label: '额外提示词注入',
+      tokens: injectedTokens,
+      color: 'var(--dsw-alias-state-purple-label, rgb(168, 85, 247))',
+      desc: '来自 dsh-extra-prompt 动态注入的全局规则与上下文快照',
+    },
+    {
+      key: 'skills',
+      label: '已加载技能 (Skills)',
+      tokens: skillTokens,
+      color: 'var(--dsw-alias-state-teal-label, rgb(20, 184, 166))',
+      desc: '工作区或用户目录按需激活的专项技能内容与操作指南',
+    },
+    {
+      key: 'compacted',
+      label: '压缩记忆摘要',
+      tokens: compactedTokens,
+      color: 'var(--dsw-alias-state-amber-label, rgb(217, 119, 6))',
+      desc: '历史轮次触发自动压缩后浓缩而成的会话记忆',
+    },
+    {
+      key: 'dialogue',
+      label: '对话交互历史',
+      tokens: dialogueTokens,
+      color: 'var(--dsw-alias-state-warn-label, rgb(249, 115, 22))',
+      desc: '多轮人机交互提问与回答历史',
+    },
+    {
+      key: 'toolResults',
+      label: '工具执行输出载荷',
+      tokens: toolResultTokens,
+      color: 'var(--dsw-alias-state-pink-label, rgb(236, 72, 153))',
+      desc: '终端执行、文件读取、正则搜索等产生的数据流',
+    },
+  ];
+
+  const totalSlicesTokens = Math.max(1, rawSlices.reduce((sum, s) => sum + s.tokens, 0));
+  const slices = rawSlices
+    .filter((s) => s.tokens > 0)
+    .map((s) => ({
+      ...s,
+      percent: Math.round((s.tokens / totalSlicesTokens) * 100),
+    }));
+
+  // Synergy metrics: RTK saves ~60% of output volume on shell commands
+  const rtkSavingsTokens = Math.round((toolResultCharsSum * 0.45) / 3.5);
+
+  return {
+    capacity: {
+      model: modelName,
+      maxWindowTokens,
+      currentContextTokens,
+      usagePercent,
+      remainingTokens,
+      safetyStatus,
+    },
+    composition: {
+      slices,
+      totalEstimate: currentContextTokens,
+      systemTokens,
+      toolSchemaTokens,
+      injectedTokens,
+      skillTokens,
+      compactedTokens,
+      dialogueTokens,
+      toolResultTokens,
+    },
+    events: events.sort((a, b) => (b.time ?? 0) - (a.time ?? 0)),
+    synergy: {
+      rtkSavingsTokens,
+      mcpToolsCount: mcpTools.size,
+      mcpSchemaTokens: mcpTools.size * 260,
+      promptInjectionsCount: promptInjectionCount,
+      promptInjectionTokens: injectedTokens,
+      skillsLoadedCount: skillCount,
+    },
+    historyTrend,
+  };
+}
+
+/**
  * Top-level dashboard aggregation function.
  * @param {any[]} entries
  * @param {Record<string, any>} [stats]
@@ -769,6 +1130,7 @@ export function sessionDashboard(entries, stats = {}, locale = 'zh', options = {
   });
 
   const cost = sessionCost(ordered);
+  const context = sessionContextInsight(ordered, stats, options);
 
   return {
     summary: {
@@ -788,6 +1150,7 @@ export function sessionDashboard(entries, stats = {}, locale = 'zh', options = {
     turns: turnPoints,
     token,
     cost,
+    context,
   };
 }
 
@@ -862,7 +1225,10 @@ export async function readSessionDashboardFromHost(ctx, requestedSessionId) {
   const tokenUsage = projections?.values?.tokenUsage ?? {};
   const mergedStats = { ...sessionStats, ...tokenUsage };
 
-  const data = sessionDashboard(events, mergedStats, 'zh');
+  const data = sessionDashboard(events, mergedStats, 'zh', {
+    header,
+    projections,
+  });
 
   const projectedTitle = projections?.values?.title;
   let sessionTitle = (typeof projectedTitle === 'string' && projectedTitle.trim() !== '') ? projectedTitle.trim() : null;
@@ -894,6 +1260,7 @@ export async function readSessionDashboardFromHost(ctx, requestedSessionId) {
     token: data.token,
     cost: data.cost,
     stats: mergedStats,
+    context: data.context,
   };
 }
 
@@ -973,3 +1340,4 @@ export async function listSessionsFromHost(ctx) {
 
   return result;
 }
+

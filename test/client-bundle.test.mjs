@@ -29,7 +29,6 @@ const BASELINE = ['react', '@deepseek-ai/dsh-client-ui-primitives']
 const NAMESPACES = [
   'extra-prompt-injection',
   'extra-subagent-routing',
-  'extra-skill-guide',
   'extra-skill-installer',
   'extra-rtk-compact',
   'extra-mcp',
@@ -42,14 +41,24 @@ const NAMESPACES = [
 const OFFICIAL_NAMESPACE = 'subagent-model-selection-settings'
 
 /**
- * The ⓘ text for a machine without rtk, spelled out rather than imported: the test
- * asserts the copy the user reads, so a reworded note has to be re-read here.
+ * The rtk card's note for a machine without rtk, spelled out rather than imported:
+ * the test asserts the copy the user reads, so a reworded note has to be re-read
+ * here.
  */
-const RTK_MISSING_NOTE = '本机没有找到 rtk 可执行文件，所以这个功能默认关闭；'
-  + '开启后也要先安装 rtk，或在本功能里指定 rtkPath，才会生效。'
+const RTK_MISSING_NOTICE = '本机没有找到 rtk 可执行文件，工具输出会原样通过；'
+  + '装上 rtk（仓库见上方）或在本功能里指定 rtkPath 后才会压缩。'
   + '刚装完 rtk 时，DSH 要重启一次才会拿到新的 PATH。'
 
-/** The upstream address the page offers, pinned so a reworded link is re-read. */
+/** The note shown when the binary is there, spelled out for the same reason. */
+const RTK_FOUND_PREFIX = '已找到 rtk：'
+
+/**
+ * The shared form frame's "this row is not mounted" copy, spelled out for the same
+ * reason: it is what tells the user to go back to the 「插件」 page.
+ */
+const UNAVAILABLE_LABEL = '这一行没有挂载：在「插件」页打开它的开关后，这里才能编辑。'
+
+/** The upstream address each card offers, pinned so a reworded link is re-read. */
 const RTK_REPO = 'https://github.com/rtk-ai/rtk'
 
 // --- a minimal React ---------------------------------------------------------
@@ -219,18 +228,14 @@ function sectionOf(tree, ns) {
  * A named control inside one panel.
  *
  * Every panel renders its own save control, so a bare `[0]` would always address
- * the first card. The enable card holds every feature's *name*, so copy cannot
- * identify a card either: scope the search to the section carrying the namespace
- * marker, and pass 'enable' for the enable card itself.
+ * the first card; scope the search to the section carrying the namespace marker
+ * instead.
  */
 function panelControl(tree, ns, predicate) {
   return findAll(sectionOf(tree, ns), predicate)[0]
 }
 
 // --- the host settings kit ---------------------------------------------------
-
-/** Labels the page handed to `Tooltip`, in render order; reset by `createKit`. */
-let tooltipLabels = []
 
 /**
  * A stand-in for the atoms `lib/client.js` requires from
@@ -241,25 +246,7 @@ let tooltipLabels = []
  * field's numeric keypad hint — and nothing more.
  */
 function createKit() {
-  tooltipLabels = []
   const Tag = (props) => h('span', { className: 'tag' }, props.children)
-  // The real Tooltip clones its anchor and renders the bubble only while it is
-  // visible, so the double renders the anchor alone and records the label the
-  // page asked for: the copy is the thing under test, not the bubble's geometry.
-  const Tooltip = (props) => {
-    tooltipLabels.push(props.label)
-    return props.children
-  }
-  const IconInfoOutlineRegular = (props) => h('svg', { className: 'icon-info', width: props.size, height: props.size })
-  // The real Pill renders a capsule button when given `onClick` and a span
-  // otherwise; the double marks the interactive case so tests can find the chips.
-  const Pill = (props) => h('button', {
-    'data-pill': true,
-    type: 'button',
-    'aria-pressed': props.active === true,
-    disabled: props.disabled === true,
-    onClick: props.onClick,
-  }, props.children)
   const Button = (props) => h('button', {
     type: 'button',
     disabled: props.disabled === true,
@@ -332,7 +319,7 @@ function createKit() {
     disabled: props.disabled === true || option.disabled === true,
     onClick: () => { if (option.value !== props.value) props.onChange(option.value) },
   }, option.label)))
-  return { SettingsForm, SettingsValueField, Switch, Tag, Button, Pill, Tooltip, IconInfoOutlineRegular, SegmentedControl }
+  return { SettingsForm, SettingsValueField, Switch, Tag, Button, SegmentedControl }
 }
 
 // --- the loader + service doubles -------------------------------------------
@@ -502,20 +489,19 @@ async function boot(values, options, settings) {
   if (settings === undefined || settings.declare !== false) {
     for (const entry of harness.awaited) entry.callback()
   }
-  return { registration, plugin, requested, appended, ...harness, tooltipLabels: () => tooltipLabels }
+  return { registration, plugin, requested, appended, ...harness }
 }
 
 /**
  * The tab each namespace lives under, mirroring `TABS` in `lib/client.js`.
  *
  * The page renders one tab's cards at a time, so a test that reads a namespace's
- * fields has to select its tab first. `'enable'` is not a tab: the enable card is
- * always visible above the bar.
+ * fields has to select its tab first. Every group is always in the bar: which
+ * rows are mounted is the 「插件」 page's business, not this page's.
  */
 const TAB_OF = {
   'extra-prompt-injection': 'prompt',
   'extra-subagent-routing': 'routing',
-  'extra-skill-guide': 'skill',
   'extra-skill-installer': 'skill',
   'extra-rtk-compact': 'rtk',
   'extra-mcp': 'mcp',
@@ -569,13 +555,37 @@ function renderPage(registered, at) {
 const settle = () => new Promise((resolve) => { setImmediate(resolve) })
 
 /**
+ * Render the conversation dashboard tab and return its tree.
+ *
+ * The same commit loop as `renderPage`, for the package's other slot: the
+ * dashboard's fetch effect has to run and its `setState` has to land before a
+ * later render carries the data.
+ */
+function renderConversationDashboard(registered, props) {
+  const entry = registered.find(item => item.slotOptions.name === 'conversation.view' && item.slotOptions.id === 'dashboard')
+  assert.ok(entry, 'the package must register the conversation dashboard tab')
+  let tree = null
+  for (let pass = 0; pass < 8; pass++) {
+    pendingEffects = []
+    stateDirty = false
+    tree = render(entry.component(props), '0')
+    const scheduled = pendingEffects
+    pendingEffects = []
+    if (scheduled.length === 0) break
+    for (const task of scheduled) task()
+    if (!stateDirty) break
+  }
+  return tree
+}
+
+/**
  * Strip the `vm` realm's prototypes so values built inside the sandbox compare
  * equal to plain literals — `deepStrictEqual` otherwise rejects them as
  * "same structure but not reference-equal".
  */
 const plain = (value) => JSON.parse(JSON.stringify(value))
 
-/** The save control of one card; pass 'enable' for the chip card. */
+/** The save control of one card, if that card is editable at all. */
 const saveOf = (registered, ns) => panelControl(
   renderPage(registered, ns),
   ns,
@@ -584,9 +594,6 @@ const saveOf = (registered, ns) => panelControl(
 
 /** Every switch the page currently renders. */
 const switchesOf = (tree) => findAll(tree, node => node.props.role === 'switch')
-
-/** Every enable chip the page currently renders, in page order. */
-const pillsOf = (tree) => findAll(tree, node => node.props['data-pill'] === true)
 
 // --- tests -------------------------------------------------------------------
 
@@ -603,13 +610,16 @@ test('registers one factory under the package name, requiring only baseline exte
   assert.deepEqual(plain(plugin.inject), ['slots', 'configForms'])
 })
 
-test('labels the page with the package name and version from the manifest', async () => {
+test('labels the page with the package name and version, and names where the switches are', async () => {
   const manifest = JSON.parse(await readFile(MANIFEST, 'utf8'))
   const { registered } = await boot()
   const intro = findAll(renderPage(registered), node => node.props.className === 'dsh-extra-intro')[0]
   // The artifact is hand-written with no build step, so this label is the only
   // place the version is duplicated; keep it honest.
-  assert.equal(textOf(intro), `${manifest.name} ${manifest.version}`)
+  assert.ok(textOf(intro).startsWith(`${manifest.name} ${manifest.version}`))
+  // The one thing this page cannot show: a feature is switched on and off on the
+  // 「插件」 page, one row each.
+  assert.ok(textOf(intro).includes('「插件」页'))
 })
 
 test('waits for the settings.section and conversation.view declarations instead of racing them', async () => {
@@ -651,12 +661,13 @@ test('the page edits exactly the namespaces the shipped rows mount', async () =>
   const patch = await readFile(PATCH, 'utf8')
   const rowNames = [...patch.matchAll(/^\s*name:\s*'(dsh-extra-prompt(?:\/[^']*)?)'/gm)].map(match => match[1])
   // Every settings row is named after the namespace it configures, so the page's
-  // list and the patch's rows have to agree field for field. Two rows are
-  // deliberately nameless: the bare row carries this browser half, and the settings
-  // page's data channel exists to answer the page rather than to hold settings.
+  // list and the patch's rows have to agree field for field. Three rows are
+  // deliberately nameless: the bare row carries this browser half, the settings
+  // page's data channel exists to answer the page rather than to hold settings, and
+  // the Tavily search row only registers a tool.
   assert.deepEqual(rowNames, ['dsh-extra-prompt']
     .concat(NAMESPACES.map(ns => 'dsh-extra-prompt/' + ns.slice('extra-'.length)))
-    .concat(['dsh-extra-prompt/settings-api']))
+    .concat(['dsh-extra-prompt/settings-api', 'dsh-extra-prompt/web-search-tavily']))
   const manifest = JSON.parse(await readFile(MANIFEST, 'utf8'))
   for (const ns of NAMESPACES) {
     assert.ok(manifest.exports['./' + ns.slice('extra-'.length)], `${ns} needs an exports subpath`)
@@ -669,23 +680,17 @@ test('renders every declared field for every namespace', async () => {
   const { registered } = await boot({
     'extra-rtk-compact': { rtkPath: '', minBodyChars: 1200, timeoutMs: 20000, maxOutputBytes: 4194304, gitStatus: true, gitDiff: true, gitLog: true, rg: true, grep: true },
     'extra-subagent-routing': { routes: [{ provider: 'deepseek-official', model: 'deepseek-v4-pro', note: '疑难推理' }], guidance: '' },
-    'extra-skill-guide': { enabled: true, customGuide: '' },
   })
 
-  // The enable card sits above the tabs, so it holds every feature's name and one
-  // chip per feature, and every one of them starts lit.
+  // The page holds no switch of its own: every feature is a row, switched on the
+  // 「插件」 page, and this page only ever configures what is mounted.
   const page = renderPage(registered)
-  for (const title of ['全局提示词注入', '子代理路由', 'Skill 编写指导', 'Skill 安装', 'rtk 输出压缩', 'MCP 服务器']) {
-    assert.ok(textOf(page).includes(title), `page must render the "${title}" feature`)
-  }
-  const chips = pillsOf(page)
-  assert.equal(chips.length, NAMESPACES.length)
-  assert.deepEqual(chips.map(node => node.props['aria-pressed']),
-    NAMESPACES.map(() => true))
+  assert.equal(findAll(page, node => node.props['data-namespace'] === 'enable').length, 0)
 
-  // Six groups: prompt / routing / skill (two namespaces) / rtk / mcp / dashboard.
-  assert.deepEqual(tabsOf(page).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'dashboard'])
-  assert.deepEqual(tabsOf(page).map(node => textOf(node)), ['提示词', '子代理路由', '技能', '输出压缩', 'MCP', '统计看板'])
+  // Five groups: prompt / routing / skill (two namespaces) / rtk / mcp. The
+  // statistics dashboard has no settings group: it lives in the conversation view.
+  assert.deepEqual(tabsOf(page).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.deepEqual(tabsOf(page).map(node => textOf(node)), ['提示词', '子代理路由', '技能', '输出压缩', 'MCP'])
 
   // Only the active group's cards are in the tree.
   assert.equal(findAll(page, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 0)
@@ -699,12 +704,11 @@ test('renders every declared field for every namespace', async () => {
   assert.equal(findAll(routing, node => node.props['aria-label'] === 'provider').length, 1)
   assert.ok(textOf(routing).includes('添加一条路由'))
 
-  // The skill group holds both of its namespaces' cards, each with a long-text
-  // field and no switch of its own (the chip card owns `enabled`).
-  const skill = renderPage(registered, 'extra-skill-guide')
-  assert.equal(findAll(skill, node => node.props['data-namespace'] === 'extra-skill-guide').length, 1)
+  // The skill group holds its one feature's card: a text field for the default ref
+  // and the page's one enum. The feature's own switch is its row, not a field here.
+  const skill = renderPage(registered, 'extra-skill-installer')
   assert.equal(findAll(skill, node => node.props['data-namespace'] === 'extra-skill-installer').length, 1)
-  assert.equal(findAll(skill, node => node.type === 'textarea').length, 1, 'only the guide card is multi-line')
+  assert.equal(findAll(skill, node => node.type === 'textarea').length, 0)
   // The installer card owns the page's one enum.
   const selects = findAll(skill, node => node.type === 'select')
   assert.equal(selects.length, 1)
@@ -719,7 +723,7 @@ test('renders every declared field for every namespace', async () => {
   assert.equal(numeric.length, 3)
   assert.deepEqual(numeric.map(node => node.props.value), ['1200', '20000', '4194304'])
   const switches = switchesOf(rtk)
-  assert.equal(switches.length, 5, 'the five rtk filter switches; the feature toggles are chips')
+  assert.equal(switches.length, 5, 'the five rtk filter switches; the feature switch is the row')
   assert.ok(switches.every(node => node.props['aria-checked'] === true))
   assert.equal(findAll(rtk, node => node.type === 'select').length, 0)
 
@@ -889,8 +893,11 @@ test('groups the cards behind a tablist and follows the selection', async () => 
   const { registered } = await boot()
   const page = renderPage(registered)
   const tabs = tabsOf(page)
+  // The statistics dashboard has no settings group: it is the conversation tab
+  // now, so nothing on this page may offer it.
+  assert.ok(!textOf(page).includes('统计看板'))
   // The selected tab names the panel it controls, and the panel names it back.
-  assert.deepEqual(tabs.map(node => node.props['aria-selected']), [true, false, false, false, false, false])
+  assert.deepEqual(tabs.map(node => node.props['aria-selected']), [true, false, false, false, false])
   const panel = findAll(page, node => node.props.role === 'tabpanel')[0]
   assert.equal(panel.props.id, 'extra-prompt-tabs-prompt-panel')
   assert.equal(panel.props['aria-labelledby'], 'extra-prompt-tabs-prompt')
@@ -898,80 +905,123 @@ test('groups the cards behind a tablist and follows the selection', async () => 
   // Switching moves the selection and swaps the panel's contents.
   tabs[3].props.onClick()
   const rtk = renderPage(registered)
-  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false, false])
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false])
   assert.equal(findAll(rtk, node => node.props.role === 'tabpanel')[0].props.id, 'extra-prompt-tabs-rtk-panel')
   assert.equal(findAll(rtk, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 1)
   assert.equal(findAll(rtk, node => node.props['data-namespace'] === 'extra-prompt-injection').length, 0)
 })
 
-test('a group leaves the bar when its last feature is switched off, and the selection falls back', async () => {
-  const { registered } = await boot()
+test('every group keeps its tab, whatever its row is doing', async () => {
+  // The rtk row is not mounted. Its card says so, and the group keeps its tab: the
+  // page's shape follows the package, not the profile.
+  const { registered } = await boot({}, { 'extra-rtk-compact': { status: 'unavailable' } })
   const rtk = renderPage(registered, 'extra-rtk-compact')
-  assert.equal(findAll(rtk, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 1)
-
-  // Stage the rtk chip off: it is that group's only feature, so the tab leaves.
-  pillsOf(rtk)[4].props.onClick()
-  const after = renderPage(registered)
-  assert.deepEqual(tabsOf(after).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'mcp', 'dashboard'])
-  // The selection pointed at the group that just left, so the panel falls back to
-  // the first group still there instead of going blank.
-  assert.equal(findAll(after, node => node.props.role === 'tabpanel')[0].props.id, 'extra-prompt-tabs-prompt-panel')
-  assert.equal(findAll(after, node => node.props['data-namespace'] === 'extra-prompt-injection').length, 1)
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false])
+  assert.ok(textOf(rtk).includes(UNAVAILABLE_LABEL))
+  // The tab next door renders its fields as usual: one unmounted row is not the
+  // whole page.
+  const prompt = renderPage(registered, 'extra-prompt-injection')
+  assert.equal(findAll(prompt, node => node.type === 'textarea').length, 1)
 })
 
-test('with every feature switched off the page keeps the enable card and the Skill manager', async () => {
-  const off = { enabled: false }
-  const { registered } = await boot({
+test('with every row switched off, every card says so and nothing is written', async () => {
+  const off = { status: 'unavailable' }
+  const { registered, forms } = await boot({}, {
     'extra-prompt-injection': off,
     'extra-subagent-routing': off,
-    'extra-skill-guide': off,
     'extra-skill-installer': off,
     'extra-rtk-compact': off,
     'extra-mcp': off,
   })
   const tree = renderPage(registered)
-  assert.equal(pillsOf(tree).length, NAMESPACES.length, 'every feature is still switchable')
-  // Both the 技能 group (with Skill manager) and the 统计看板 group stay available.
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['skill', 'dashboard'])
-  assert.equal(findAll(tree, node => node.props.role === 'tabpanel').length, 1)
-  assert.equal(findAll(tree, node => node.type === 'section').length, 2, 'the enable card and the Skill manager')
-  assert.equal(findAll(tree, node => node.props['data-namespace'] === 'extra-managed-skills').length, 1)
-  // No feature card survived the switches.
-  NAMESPACES.forEach(ns => assert.equal(findAll(tree, node => node.props['data-namespace'] === ns).length, 0))
+  // The default group's card reports the row rather than rendering dead controls.
+  assert.ok(textOf(tree).includes(UNAVAILABLE_LABEL))
+  assert.equal(saveOf(registered, 'extra-prompt-injection'), undefined)
+  // The bar still carries every group...
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  // ...and the 技能 group still carries the Skill manager, which is not a row.
+  const skill = renderPage(registered, 'extra-skill-installer')
+  assert.equal(findAll(skill, node => node.props['data-namespace'] === 'extra-managed-skills').length, 1)
+  // No page-level switch survived to write an `enabled` field for anyone.
+  NAMESPACES.forEach(ns => assert.deepEqual(forms[ns].calls, []))
 })
 
-test('the installed-Skill card reads the Host and only offers what the Host allows', async () => {
-  // Both Skill features off: the manager is not one of them, so it has to stay.
-  const off = { enabled: false }
-  const { registered } = await boot({ 'extra-skill-guide': off, 'extra-skill-installer': off })
+test('the Skill card lists what the model can read and only offers what the Host owns', async () => {
+  // The catalog card belongs to no row: installed Skills are registry state, so it
+  // is there whatever the skill-installer row happens to be doing.
+  const { registered } = await boot()
   apiAnswers.set('skills/list', {
     ok: true,
     value: {
+      catalogAvailable: true,
+      workspaces: [{ cwd: 'D:\\Code\\demo', found: 2, preset: 'standard' }],
+      notes: [],
       skills: [
         {
-          directoryName: 'taste-skill',
           skillName: 'taste-skill',
-          source: 'https://github.com/acme/skills',
-          ref: 'main',
-          installationId: 'aa11',
-          removable: true,
+          description: 'Taste rules for this machine.',
+          source: 'user-dsh',
+          provider: 'filesystem',
+          modelInvocable: true,
+          userInvocable: true,
+          directory: 'C:\\dsh\\skills\\taste-skill',
+          managed: {
+            directoryName: 'taste-skill',
+            installationId: 'aa11',
+            source: 'https://github.com/acme/skills',
+            ref: 'main',
+            installPath: 'C:\\dsh\\skills\\taste-skill',
+            removable: true,
+          },
         },
         {
-          directoryName: 'hand-edited',
           skillName: 'hand-edited',
-          source: 'https://github.com/acme/other',
-          ref: 'dev',
-          installationId: 'bb22',
-          removable: false,
-          reason: '目录中的受管标记与记录不一致，为避免删除非本插件安装的内容，这里不会移除它。',
+          description: 'A directory whose marker no longer matches.',
+          source: 'user-dsh',
+          provider: 'filesystem',
+          modelInvocable: true,
+          userInvocable: true,
+          directory: 'C:\\dsh\\skills\\hand-edited',
+          managed: {
+            directoryName: 'hand-edited',
+            installationId: 'bb22',
+            source: 'https://github.com/acme/other',
+            ref: 'dev',
+            installPath: 'C:\\dsh\\skills\\hand-edited',
+            removable: false,
+            reason: '目录中的受管标记与记录不一致，为避免删除非本插件安装的内容，这里不会移除它。',
+          },
+        },
+        {
+          // A workspace Skill the Host resolved for this project, plus one the model
+          // may not use: both are readable, and the card says which is which.
+          skillName: 'api-review',
+          description: 'Review API changes.',
+          source: 'project-dsh',
+          provider: 'filesystem',
+          modelInvocable: true,
+          userInvocable: true,
+          directory: 'D:\\Code\\demo\\.dsh\\skills\\api-review',
+          workspace: 'D:\\Code\\demo',
+        },
+        {
+          skillName: 'private-notes',
+          description: 'Only the human may invoke this one.',
+          source: 'project-agents',
+          provider: 'filesystem',
+          modelInvocable: false,
+          userInvocable: true,
+          directory: 'D:\\Code\\demo\\.agents\\skills\\private-notes',
+          workspace: 'D:\\Code\\demo',
         },
       ],
     },
   })
 
-  renderPage(registered, 'extra-skill-guide')
+  renderPage(registered, 'extra-skill-installer')
   await settle()
-  const card = sectionOf(renderPage(registered, 'extra-skill-guide'), 'extra-managed-skills')
+  const card = sectionOf(renderPage(registered, 'extra-skill-installer'), 'extra-managed-skills')
 
   // Reading is one POST to this package's own route, carrying the session cookie
   // Connection authenticates, and it asks for nothing else. The page's other
@@ -982,20 +1032,27 @@ test('the installed-Skill card reads the Host and only offers what the Host allo
     credentials: 'same-origin',
     body: { op: 'skills/list' },
   }])
-  assert.ok(textOf(card).includes('taste-skill'))
-  assert.ok(textOf(card).includes('https://github.com/acme/skills @ main'))
+  const text = textOf(card)
+  assert.ok(text.includes('taste-skill'))
+  assert.ok(text.includes('https://github.com/acme/skills @ main'))
+  // Where it came from and where it lives: the workspace and preset the Host read
+  // through, the registry bucket, and the directory the model resolves against.
+  assert.ok(text.includes('已挂载工作区：D:\\Code\\demo（standard 预设）'))
+  assert.ok(text.includes('工作区 .dsh/skills（project-dsh）'))
+  assert.ok(text.includes('D:\\Code\\demo\\.dsh\\skills\\api-review'))
+  assert.ok(text.includes('模型不可见（disable-model-invocation）'))
 
   // The Host's verdict decides the row: only the installation it can still prove is
   // offered for removal, and the other one explains itself instead.
   const buttons = findAll(card, node => node.type === 'button')
   assert.equal(buttons.length, 1)
   assert.equal(textOf(buttons[0]), '卸载')
-  assert.ok(textOf(card).includes('为避免删除非本插件安装的内容'))
+  assert.ok(text.includes('为避免删除非本插件安装的内容'))
 
   apiAnswers.set('skills/remove', { ok: true, value: { removed: { directoryName: 'taste-skill' } } })
   buttons[0].props.onClick()
   await settle()
-  renderPage(registered, 'extra-skill-guide')
+  renderPage(registered, 'extra-skill-installer')
 
   // Removal is addressed by the opaque installation identity, never by name alone,
   // and the list is re-read from the Host afterwards rather than spliced locally.
@@ -1006,18 +1063,30 @@ test('the installed-Skill card reads the Host and only offers what the Host allo
   ])
 })
 
-test('the installed-Skill card reports a refused removal instead of hiding it', async () => {
+test('the Skill card reports a refused removal instead of hiding it', async () => {
   const { registered } = await boot()
   apiAnswers.set('skills/list', {
     ok: true,
     value: {
+      catalogAvailable: true,
+      workspaces: [],
+      notes: ['没有挂载的 profile 目录，无法读取 extra-prompt-managed-skills.json。'],
       skills: [{
-        directoryName: 'taste-skill',
         skillName: 'taste-skill',
-        source: 'https://github.com/acme/skills',
-        ref: 'main',
-        installationId: 'aa11',
-        removable: true,
+        description: '',
+        source: 'user-dsh',
+        provider: 'filesystem',
+        modelInvocable: true,
+        userInvocable: true,
+        directory: 'C:\\dsh\\skills\\taste-skill',
+        managed: {
+          directoryName: 'taste-skill',
+          installationId: 'aa11',
+          source: 'https://github.com/acme/skills',
+          ref: 'main',
+          installPath: 'C:\\dsh\\skills\\taste-skill',
+          removable: true,
+        },
       }],
     },
   })
@@ -1026,14 +1095,14 @@ test('the installed-Skill card reports a refused removal instead of hiding it', 
     error: { code: 'extra-prompt/skill-not-removed', message: '目录中的受管标记与记录不一致，已拒绝删除。' },
   })
 
-  renderPage(registered, 'extra-skill-guide')
+  renderPage(registered, 'extra-skill-installer')
   await settle()
-  const button = () => findAll(sectionOf(renderPage(registered, 'extra-skill-guide'), 'extra-managed-skills'),
+  const button = () => findAll(sectionOf(renderPage(registered, 'extra-skill-installer'), 'extra-managed-skills'),
     node => node.type === 'button')[0]
   button().props.onClick()
   await settle()
 
-  const card = sectionOf(renderPage(registered, 'extra-skill-guide'), 'extra-managed-skills')
+  const card = sectionOf(renderPage(registered, 'extra-skill-installer'), 'extra-managed-skills')
   // The Host's own message reaches the page, and the row is still there to retry:
   // a removal that failed must not look like one that succeeded.
   assert.ok(textOf(card).includes('已拒绝删除'))
@@ -1041,21 +1110,11 @@ test('the installed-Skill card reports a refused removal instead of hiding it', 
   assert.ok(textOf(card).includes('taste-skill'))
 })
 
-test('the session dashboard tab loads sessions, renders charts, metrics, and handles range switching', async () => {
+test('the in-session dashboard renders charts, metrics, and handles range switching', async () => {
   const { registered } = await boot()
 
-  // Mock sessions list API
-  apiAnswers.set('dashboard/sessions', {
-    ok: true,
-    value: {
-      sessions: [
-        { id: 'sess-1', title: '重构看板前端', updatedAt: 1710000000000 },
-        { id: 'sess-2', title: '修复网络异常', updatedAt: 1709900000000 },
-      ],
-    },
-  })
-
-  // Mock session data API
+  // The dashboard is a conversation tab now: the session comes from the tab, so
+  // the only operation it may ask the Host for is that session's data.
   apiAnswers.set('dashboard/data', {
     ok: true,
     value: {
@@ -1126,15 +1185,23 @@ test('the session dashboard tab loads sessions, renders charts, metrics, and han
     },
   })
 
-  // Select the 'dashboard' tab and wait for sessions + data promises to settle
-  renderPage(registered, 'dashboard')
+  // The tab hands over its own session, so the view loads that one directly.
+  renderConversationDashboard(registered, { sessionId: 'sess-1' })
   await settle()
   await settle()
-  const page = renderPage(registered, 'dashboard')
+  const page = renderConversationDashboard(registered, { sessionId: 'sess-1' })
   const content = textOf(page)
+
+  // The only thing it asks the Host for is that session: the cross-session list
+  // that fed the old settings group is gone along with the group.
+  assert.deepEqual(apiRequests.map(call => call.body.op), ['dashboard/data'])
+  assert.deepEqual(plain(apiRequests[0].body), { op: 'dashboard/data', sessionId: 'sess-1' })
 
   // Verify elements are rendered
   assert.ok(content.includes('重构看板前端'))
+  assert.ok(content.includes('上下文窗口容量与多层级解剖'))
+  assert.ok(content.includes('Extra-Prompt 协同效益与开销'))
+  assert.ok(content.includes('上下文生命周期事件流'))
   assert.ok(content.includes('会话耗时'))
   assert.ok(content.includes('对话轮次 / 步数'))
   assert.ok(content.includes('Token 消耗总量'))
@@ -1148,6 +1215,8 @@ test('the session dashboard tab loads sessions, renders charts, metrics, and han
   // Verify charts and SVG elements
   const donutSvg = findAll(page, node => node.type === 'svg' && node.props['aria-label'] === 'Token 构成比例图')[0]
   assert.ok(donutSvg, 'must render SVG donut chart')
+  const gaugeSvg = findAll(page, node => node.type === 'svg' && node.props['aria-label'] === '上下文窗口水位图')[0]
+  assert.ok(gaugeSvg, 'must render SVG context window gauge')
 
   // Verify tool table has pwsh and read
   assert.ok(content.includes('pwsh'))
@@ -1160,7 +1229,7 @@ test('the session dashboard tab loads sessions, renders charts, metrics, and han
   const recentBtn = findAll(page, node => node.type === 'button' && textOf(node).includes('最近 8 轮'))[0]
   assert.ok(recentBtn, 'must have range button for recent turns')
   recentBtn.props.onClick()
-  const pageRecent = renderPage(registered, 'dashboard')
+  const pageRecent = renderConversationDashboard(registered, { sessionId: 'sess-1' })
   assert.ok(pageRecent, 'renders after range switch')
 })
 
@@ -1291,31 +1360,27 @@ test('an incomplete route row blocks the save instead of writing a broken route'
   }])
 })
 
-test('an unmounted namespace reports itself instead of rendering dead controls', async () => {
-  const { registered, tooltipLabels } = await boot({}, { 'extra-rtk-compact': { status: 'unavailable' } })
-  const tree = renderPage(registered)
-  // Its chip stays, unlit and disabled, with the reason on its ⓘ: the feature
-  // exists, its row is just not in this profile.
-  const chips = pillsOf(tree)
-  assert.equal(chips.length, NAMESPACES.length)
-  assert.equal(chips[4].props.disabled, true, 'an unmounted feature cannot be switched on')
-  assert.equal(chips[4].props['aria-pressed'], false)
-  assert.equal(chips[0].props.disabled, false, 'the mounted features keep their chip live')
-  assert.ok(tooltipLabels().includes('此行没有挂载到当前 profile，无法启用。'))
-  // Its group holds nothing else, so it leaves the bar: an unavailable feature
-  // cannot be switched on, so it must never grow a tab either.
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'mcp', 'dashboard'])
-  assert.equal(findAll(tree, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 0)
-  assert.equal(switchesOf(tree).length, 0)
+test('an unmounted row reports itself instead of rendering dead controls', async () => {
+  const { registered } = await boot({}, { 'extra-rtk-compact': { status: 'unavailable' } })
+  const tree = renderPage(registered, 'extra-rtk-compact')
+  // The card is the honest state: the Host serves no form for a row it does not
+  // mount, so the page explains where to switch it back on.
+  assert.ok(textOf(sectionOf(tree, 'extra-rtk-compact')).includes(UNAVAILABLE_LABEL))
+  assert.equal(saveOf(registered, 'extra-rtk-compact'), undefined, 'nothing to save')
+  assert.equal(switchesOf(sectionOf(tree, 'extra-rtk-compact')).length, 0)
+  // The group keeps its tab, and the other rows keep their fields.
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  const prompt = renderPage(registered, 'extra-prompt-injection')
+  assert.equal(findAll(prompt, node => node.type === 'textarea').length, 1)
 })
 
-test('rtk reads off by default on a machine that has no rtk', async () => {
-  const { registered, forms, tooltipLabels } = await boot()
+test('the rtk card reports a machine that has no rtk, beside the field that fixes it', async () => {
+  const { registered } = await boot()
   // Only the Host can answer this, and it answers about the path the page holds.
   apiAnswers.set('rtk/status', { ok: true, value: { available: false, path: null, source: 'path' } })
   renderPage(registered)
   await settle()
-  const tree = renderPage(registered)
+  const tree = renderPage(registered, 'extra-rtk-compact')
 
   assert.deepEqual(plain(apiRequests.filter(call => call.body.op === 'rtk/status')), [{
     url: '/api/extra-prompt',
@@ -1323,43 +1388,22 @@ test('rtk reads off by default on a machine that has no rtk', async () => {
     credentials: 'same-origin',
     body: { op: 'rtk/status', rtkPath: '' },
   }])
-  // The profile's default is on, and the chip is still dark: a switch for a feature
-  // that cannot run is a lie, and this machine has no rtk.
-  assert.equal(pillsOf(tree)[4].props['aria-pressed'], false)
-  // Dark for a machine reason, not a profile one, so it stays throwable — that
-  // switch is also the only way back to the rtkPath field it would otherwise hide.
-  assert.equal(pillsOf(tree)[4].props.disabled, false)
-  assert.ok(tooltipLabels().includes(RTK_MISSING_NOTE))
-
-  // A tooltip cannot be clicked through to an install, so the card that holds the
-  // switch also states the address: exactly one link, and it is the upstream repo.
-  const links = findAll(tree, node => node.type === 'a')
+  // Without rtk every result passes through untouched, which looks exactly like a
+  // filter that works; the card that configures it is where that gets said.
+  assert.ok(textOf(tree).includes(RTK_MISSING_NOTICE))
+  // Exactly one link on the card — the repository in its head — and the note points
+  // at it rather than printing the address a second time.
+  const links = findAll(sectionOf(tree, 'extra-rtk-compact'), node => node.type === 'a')
   assert.deepEqual(links.map(node => node.props.href), [RTK_REPO])
   assert.equal(links[0].props.target, '_blank')
   assert.ok(links[0].props.rel.includes('noopener'))
-  assert.ok(textOf(tree).includes('本机没有找到 rtk，「rtk 输出压缩」因此默认关闭'))
-
-  // Its group leaves the bar, exactly as it would if the profile had switched it off.
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'mcp', 'dashboard'])
-
-  // Thrown on purpose, the feature comes back and stays back once saved: the profile
-  // now carries the user's own answer, which outranks the machine's.
-  pillsOf(tree)[4].props.onClick()
-  const on = renderPage(registered, 'extra-rtk-compact')
-  assert.equal(pillsOf(on)[4].props['aria-pressed'], true)
-  assert.deepEqual(tabsOf(on).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'dashboard'])
-  saveOf(registered, 'enable').props.onClick()
-  await settle()
-  assert.deepEqual(plain(forms['extra-rtk-compact'].calls), [
-    { op: 'set', field: 'enabled', value: true },
-  ])
-  const saved = renderPage(registered)
-  assert.equal(pillsOf(saved)[4].props['aria-pressed'], true, 'the explicit answer is kept')
+  // The field the note tells the user about is on the same card.
+  assert.ok(panelControl(tree, 'extra-rtk-compact', node => node.type === 'input'))
 })
 
-test('a profile that already answered about rtk is not overruled by the machine', async () => {
-  const { registered, tooltipLabels } = await boot(
-    { 'extra-rtk-compact': { enabled: true, rtkPath: 'D:/tools/rtk.exe' } },
+test('the probe follows the configured path, and a wrong path is still reported', async () => {
+  const { registered } = await boot(
+    { 'extra-rtk-compact': { rtkPath: 'D:/tools/rtk.exe' } },
     { 'extra-rtk-compact': { user: { rtkPath: 'D:/tools/rtk.exe' } } },
   )
   // A configured path is the one case the Host cannot look up on its own, so the
@@ -1367,83 +1411,64 @@ test('a profile that already answered about rtk is not overruled by the machine'
   apiAnswers.set('rtk/status', { ok: true, value: { available: false, path: null, source: 'configured' } })
   renderPage(registered)
   await settle()
-  const tree = renderPage(registered)
+  const tree = renderPage(registered, 'extra-rtk-compact')
 
   assert.equal(apiRequests.filter(call => call.body.op === 'rtk/status')[0].body.rtkPath, 'D:/tools/rtk.exe')
-  // The user pointed rtk somewhere, so the feature keeps its switch and its card:
-  // switching it off here would hide the very field that needs correcting.
-  assert.equal(pillsOf(tree)[4].props['aria-pressed'], true)
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'dashboard'])
-  // The reason still travels on the ⓘ: a lit switch that cannot run is exactly what
-  // the user needs told.
-  assert.ok(tooltipLabels().includes(RTK_MISSING_NOTE))
+  // The note still travels: a row that is mounted but cannot run is exactly what the
+  // user needs told, whatever the reason.
+  assert.ok(textOf(tree).includes(RTK_MISSING_NOTICE))
 })
 
-test('a machine that has rtk keeps the feature on and is asked once per path', async () => {
+test('a machine that has rtk is asked once per path, and the card names the binary', async () => {
   const { registered } = await boot()
   apiAnswers.set('rtk/status', { ok: true, value: { available: true, path: 'C:/bin/rtk.exe', source: 'path' } })
   renderPage(registered)
   await settle()
-  const tree = renderPage(registered)
+  const tree = renderPage(registered, 'extra-rtk-compact')
 
-  assert.equal(pillsOf(tree)[4].props['aria-pressed'], true)
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'dashboard'])
-  // Nothing is missing here, so nothing tells the user to install anything.
-  assert.deepEqual(findAll(tree, node => node.type === 'a'), [])
-  // The card that configures rtk names where rtk comes from, next to its summary.
-  const rtk = renderPage(registered, 'extra-rtk-compact')
-  const head = findAll(sectionOf(rtk, 'extra-rtk-compact'), node => node.props.className === 'dsh-extra-cardHead')[0]
-  assert.deepEqual(findAll(head, node => node.type === 'a').map(node => node.props.href), [RTK_REPO])
+  assert.ok(textOf(tree).includes(RTK_FOUND_PREFIX + 'C:/bin/rtk.exe'))
+  assert.ok(!textOf(tree).includes(RTK_MISSING_NOTICE), 'nothing is missing here')
+  // The one link stays the repository: the found note adds no second one.
+  assert.deepEqual(findAll(sectionOf(tree, 'extra-rtk-compact'), node => node.type === 'a').map(node => node.props.href), [RTK_REPO])
   // A re-render is not a reason to ask again: the answer depends on rtkPath alone.
   assert.equal(apiRequests.filter(call => call.body.op === 'rtk/status').length, 1)
 })
 
-test('an unanswerable rtk question leaves the profile default alone', async () => {
+test('an unanswerable rtk question adds no claim to the card', async () => {
   // No scripted answer at all: the route rejects, which is also what an older Host
   // or a Host without the lookup seam looks like.
   const { registered } = await boot()
   renderPage(registered)
   await settle()
-  const after = renderPage(registered)
-  assert.equal(pillsOf(after)[4].props['aria-pressed'], true,
-    'an unanswered question must never switch a working feature off')
-  assert.equal(pillsOf(after)[4].props.disabled, false)
+  const tree = renderPage(registered, 'extra-rtk-compact')
+  assert.ok(!textOf(tree).includes(RTK_MISSING_NOTICE), 'an unanswered question is not a missing binary')
+  assert.ok(!textOf(tree).includes(RTK_FOUND_PREFIX))
+  // The card and its fields are there either way: the probe is decoration on a form
+  // that does not depend on it.
+  assert.ok(panelControl(tree, 'extra-rtk-compact', node => node.type === 'input'))
 })
 
-test('a chip reveals one feature: its settings card shows only while it is on', async () => {
-  const { registered, forms } = await boot({ 'extra-skill-installer': { enabled: false } })
-  const cardOf = (ns, tree) => findAll(tree, node => node.props['data-namespace'] === ns)
-  const tree = renderPage(registered)
-  assert.equal(pillsOf(tree)[3].props['aria-pressed'], false, 'the off feature starts unlit')
-  // Its own group is still there because the other skill feature is on, and holds
-  // only that one's card.
-  const skill = renderPage(registered, 'extra-skill-guide')
-  assert.deepEqual(tabsOf(skill).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'dashboard'])
-  assert.equal(cardOf('extra-skill-guide', skill).length, 1)
-  assert.equal(cardOf('extra-skill-installer', skill).length, 0, 'an off feature has no settings card')
-
-  // Switching it on reveals the card immediately, before the chip card is saved.
-  pillsOf(tree)[3].props.onClick()
-  const after = renderPage(registered, 'extra-skill-installer')
-  assert.equal(pillsOf(after)[3].props['aria-pressed'], true)
-  assert.equal(cardOf('extra-skill-installer', after).length, 1)
-  assert.deepEqual(forms['extra-skill-installer'].calls, [], 'revealing is not a write')
-
-  // The chip card then commits exactly the switch that moved.
-  const save = saveOf(registered, 'enable')
-  assert.equal(save.props.disabled, false)
-  save.props.onClick()
-  await settle()
-  assert.deepEqual(plain(forms['extra-skill-installer'].calls), [
-    { op: 'set', field: 'enabled', value: true },
-  ])
+test('a switched-off row leaves its card uneditable, and the Skill manager beside it', async () => {
+  const { registered, forms } = await boot({}, { 'extra-skill-installer': { status: 'unavailable' } })
+  const tree = renderPage(registered, 'extra-skill-installer')
+  // Its own group is still there: the page does not move when a row does.
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.ok(textOf(sectionOf(tree, 'extra-skill-installer')).includes(UNAVAILABLE_LABEL))
+  assert.equal(saveOf(registered, 'extra-skill-installer'), undefined)
+  // The Skill manager is not a row: it stays reachable in the same group.
+  assert.equal(findAll(tree, node => node.props['data-namespace'] === 'extra-managed-skills').length, 1)
+  // And nothing here tries to switch the row back on by itself.
+  assert.deepEqual(forms['extra-skill-installer'].calls, [])
 })
 
-test('each chip carries its purpose on the ⓘ', async () => {
-  const { registered, tooltipLabels } = await boot()
-  pillsOf(renderPage(registered))
-  assert.ok(tooltipLabels().includes('每个会话的第一步注入一段固定文本。'))
-  assert.ok(tooltipLabels().includes('提供 skill-install 工具，从 GitHub 安装 Skill。'))
+test('the page holds no feature switch, and says where the switches are instead', async () => {
+  const { registered } = await boot()
+  const page = renderPage(registered)
+  // The enable card is gone: `enabled` is no longer a setting of any of these rows.
+  assert.equal(findAll(page, node => node.props['data-namespace'] === 'enable').length, 0)
+  assert.ok(textOf(page).includes('开与关都在「插件」页'))
+  // The prompt card's only control is its textarea: no switch was smuggled in.
+  assert.equal(switchesOf(sectionOf(page, 'extra-prompt-injection')).length, 0)
 })
 
 test('warns when a configured route is outside the delegation policy, and never writes that policy', async () => {
