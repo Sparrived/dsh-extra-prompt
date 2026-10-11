@@ -681,8 +681,15 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
     || options.projections?.values?.modelSelection?.lastUsed?.model
     || options.projections?.values?.modelSelection?.next?.model;
 
+  let explicitWindow = stats.contextWindow ?? stats.maxTokens;
+
   for (const item of ordered) {
     const event = item?.event || item;
+    if (event.type === 'request/context') {
+      const d = recordValue(event.data) ?? {};
+      if (typeof d.model === 'string' && d.model) detectedModel = d.model;
+      if (typeof d.contextWindow === 'number' && d.contextWindow > 0) explicitWindow = d.contextWindow;
+    }
     if (event.type === 'request/header') {
       const m = event.data?.header?.config?.model;
       if (m) detectedModel = m;
@@ -699,7 +706,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
   }
 
   const modelName = detectedModel || '当前模型';
-  const maxWindowTokens = resolveModelWindowTokens(modelName, stats.contextWindow ?? stats.maxTokens);
+  const maxWindowTokens = resolveModelWindowTokens(modelName, explicitWindow);
 
   let latestInputTokens = 0;
   let userChars = 0;
