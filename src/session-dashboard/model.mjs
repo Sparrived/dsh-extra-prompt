@@ -718,6 +718,15 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
   let skillCount = 0;
   const distinctTools = new Set();
   const mcpTools = new Set();
+  /**
+   * Lifecycle events, one per noteworthy context-window action.
+   *
+   * Each entry carries `kind` (compact | prune | inject) and a plain-language
+   * `badge`. The badge is TEXT ONLY and deliberately holds no glyph: what an
+   * event looks like is the browser half's business, and it draws the icon for
+   * `kind` from the host's icon set. A symbol baked in here would ride the API
+   * as data and could never follow the client's theme or icon language.
+   */
   const events = [];
   const historyTrend = [];
 
@@ -757,7 +766,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
           time,
           kind: 'prune',
           title: `工具 [${toolName}] 输出剪枝`,
-          badge: '✂ 剪枝',
+          badge: '剪枝',
           deltaTokens: -Math.round((chars * 0.4) / 3.5),
           details: `截断超长返回 (${formatMetricVolume(chars)})，避免冲垮上下文`,
         });
@@ -788,7 +797,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
             time,
             kind: 'inject',
             title: '技能定义注入 (Skill)',
-            badge: '💉 技能',
+            badge: '技能',
             deltaTokens: Math.max(1, Math.round(chars / 3.5)),
             details: `加载外部技能规范 (~${formatTokens(Math.round(chars / 3.5))} Tokens)`,
           });
@@ -802,7 +811,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
             time,
             kind: 'inject',
             title: '额外提示词规则注入',
-            badge: '💉 注入',
+            badge: '注入',
             deltaTokens: Math.max(1, Math.round(chars / 3.5)),
             details: `注入提示词/环境上下文 (~${formatTokens(Math.round(chars / 3.5))} Tokens)`,
           });
@@ -824,7 +833,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
         time,
         kind: 'compact',
         title: `第 ${turn ?? '?'} 轮 上下文自动压缩`,
-        badge: '✂ 压缩',
+        badge: '压缩',
         deltaTokens: -reclaimed,
         details: reclaimed > 0 ? `释放了 ${formatTokens(reclaimed)} Tokens` : '历史消息浓缩为记忆摘要',
       });
@@ -862,7 +871,7 @@ export function sessionContextInsight(entries, stats = {}, options = {}) {
           time,
           kind: 'compact',
           title: `第 ${turn ?? '?'} 轮 上下文自动压缩`,
-          badge: '✂ 压缩',
+          badge: '压缩',
           deltaTokens: -reclaimed,
           details: `触发上下文压缩，释放了 ${formatTokens(reclaimed)} Tokens (-${ratio}%)`,
         });

@@ -495,6 +495,19 @@ test('sessionContextInsight: extracts capacity, composition slices, lifecycle ev
   const pruneEvent = insight.events.find((e) => e.kind === 'prune');
   assert.ok(pruneEvent, 'must detect prune/truncation event');
 
+  // A badge is a plain label, never a glyph: what an event looks like belongs to
+  // the browser half, which draws the icon for `kind` from the host's icon set.
+  // A symbol baked in here would cross the API as data and could never follow the
+  // client's theme or its icon language — and it would be the only place on the
+  // dashboard that is not a vector.
+  assert.equal(compactEvent.badge, '压缩');
+  assert.equal(pruneEvent.badge, '剪枝');
+  assert.deepEqual([...new Set(injectEvents.map((e) => e.badge))].sort(), ['技能', '注入']);
+  for (const event of insight.events) {
+    assert.ok(['compact', 'prune', 'inject'].includes(event.kind), `unexpected event kind "${event.kind}"`);
+    assert.match(event.badge, /^[\u4e00-\u9fff]+$/u, `badge "${event.badge}" must be a plain label`);
+  }
+
   // Synergy check
   assert.equal(insight.synergy.mcpToolsCount, 1);
   assert.equal(insight.synergy.skillsLoadedCount, 1);

@@ -25,6 +25,51 @@ const PATCH = new URL('../cordis.patch.yml', import.meta.url)
 /** The baseline externals the browser half is allowed to require. */
 const BASELINE = ['react', '@deepseek-ai/dsh-client-ui-primitives']
 
+/**
+ * Every icon of the host's set this bundle is allowed to name, pinned.
+ *
+ * The bundle reads its glyphs from `@deepseek-ai/dsh-client-ui-primitives`
+ * rather than drawing them, so these names are a dependency on the host: an icon
+ * that gets renamed upstream stops resolving, and the page silently draws its
+ * fallback outline instead. Pinning the list here means adding or renaming one
+ * has to be re-read against the host's own export list rather than discovered as
+ * a slightly-wrong-looking glyph.
+ *
+ * Verified against both clients this package targets — the vendored 0.1.7-rc.2
+ * checkout (`packages/client/ui-primitives/src/icons/index.tsx`) and the
+ * installed 0.2.0-rc.2 bundle, which share the `…OutlineRegular` surface and the
+ * `{ size, className }` props.
+ */
+const HOST_ICON_NAMES = [
+  'IconApiOutlineRegular',
+  'IconArchiveOffOutlineRegular',
+  'IconBranchOutlineRegular',
+  'IconCheckCircleOutlineRegular',
+  'IconChevronDownOutlineRegular',
+  'IconChevronRightOutlineRegular',
+  'IconClockOutlineRegular',
+  'IconCompactOutlineRegular',
+  'IconContextInjectionOutlineRegular',
+  'IconFlatListOutlineRegular',
+  'IconFolderOpenOutlineRegular',
+  'IconRefreshOutlineRegular',
+  'IconSkillOutlineRegular',
+  'IconSlidersTwoOutlineRegular',
+]
+
+/**
+ * Anything a font would draw as an emoji or as a text glyph standing in for art.
+ *
+ * The symbol ranges are the interesting half — U+2190–21FF arrows, U+2300–23FF
+ * technical marks, U+25A0–27BF geometric shapes and dingbats, U+2B00–2BFF — and
+ * they are exactly what a plain "emoji" check misses. Every glyph this page used
+ * to draw as a font character lives there rather than in the emoji blocks:
+ * U+1F4AC/U+1F489/U+1F9E9 and friends for the cards, U+2702 for compaction,
+ * U+25B8/U+25BE for the advanced-settings disclosure, U+21BB for refresh, and
+ * U+2713 for the no-rework notice.
+ */
+const PICTURE_GLYPH = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{27BF}\u{2900}-\u{297F}\u{2B00}-\u{2BFF}\u{3030}\u{303D}\u{3297}\u{3299}\u{FE0F}\u{20E3}]/u
+
 /** The namespaces the page is expected to edit, in page order. */
 const NAMESPACES = [
   'extra-prompt-injection',
@@ -177,6 +222,12 @@ function componentIdOf(type) {
 function render(element, path) {
   if (element === null || element === undefined || typeof element !== 'object') return element
   if (Array.isArray(element)) return element.map((item, index) => render(item, path + '.' + index))
+  // A `memo`/`forwardRef`/`lazy` component is an object carrying `$$typeof`, not a
+  // function; React renders its inner type, so the harness unwraps it the same way
+  // rather than mistaking it for a host element.
+  if (element.type !== null && typeof element.type === 'object' && element.type.$$typeof !== undefined) {
+    return render({ type: element.type.type, props: element.props }, path)
+  }
   if (typeof element.type === 'function') {
     const previous = scope
     scope = { path: path + '@' + componentIdOf(element.type), index: 0 }
@@ -217,6 +268,17 @@ function textOf(node) {
   return out.join('')
 }
 
+/**
+ * Every host icon drawn inside a node, by name, in document order.
+ *
+ * The icon doubles mark themselves with `data-icon`; the page's own fallback
+ * outline carries no marker, so `undefined` entries here mean the page drew a
+ * glyph the host does not export.
+ */
+function iconsOf(node) {
+  return findAll(node, item => item.type === 'svg').map(item => item.props['data-icon'])
+}
+
 /** The card of one namespace, addressed by its marker rather than by its copy. */
 function sectionOf(tree, ns) {
   const section = findAll(tree, node => node.type === 'section' && node.props['data-namespace'] === ns)[0]
@@ -242,16 +304,48 @@ function panelControl(tree, ns, predicate) {
  * `@deepseek-ai/dsh-client-ui-primitives`. The real ones are React components
  * with the host's own CSS modules; what this suite checks is that the page hands
  * them the right props, so the doubles reproduce their prop contracts — including
- * the save control's disabled rule (`!dirty || invalid || saving`) and the value
- * field's numeric keypad hint — and nothing more.
+ * the save control's disabled rule (`!dirty || invalid || saving`), the value
+ * field's numeric keypad hint, and the button's separate `icon` slot — and
+ * nothing more.
+ *
+ * The icon set is doubled too, with the real contract: a decorative 16x16
+ * `currentColor` outline that contributes no text. Each carries a `data-icon`
+ * marker so a test can assert which glyph a given spot drew, and
+ * `options.missingIcon` drops one to exercise the page's fallback path.
  */
-function createKit() {
+function createKit(options = {}) {
+  const icons = {}
+  for (const name of HOST_ICON_NAMES) {
+    icons[name] = (props) => h('svg', {
+      'data-icon': name,
+      'aria-hidden': 'true',
+      width: props.size,
+      height: props.size,
+      viewBox: '0 0 16 16',
+    })
+  }
+  if (options.missingIcon !== undefined) delete icons[options.missingIcon]
+  // A host that wraps its icons in `memo`/`forwardRef` hands the page an object
+  // carrying `$$typeof` rather than a bare function. Modelled here so the page's
+  // resolver can be held to accepting it.
+  if (options.wrapIcon !== undefined) {
+    icons[options.wrapIcon] = { $$typeof: Symbol.for('react.memo'), type: icons[options.wrapIcon] }
+  }
+
   const Tag = (props) => h('span', { className: 'tag' }, props.children)
   const Button = (props) => h('button', {
     type: 'button',
     disabled: props.disabled === true,
     onClick: props.onClick,
-  }, props.children)
+  }, [
+    // The real atom renders `{icon != null && <span className={css.icon}>{icon}</span>}`
+    // ahead of its children, so a leading-icon assertion has to look where the
+    // host puts it.
+    props.icon === undefined || props.icon === null
+      ? null
+      : h('span', { key: 'icon', className: 'icon' }, props.icon),
+    props.children,
+  ])
   const Switch = (props) => h('button', {
     type: 'button',
     role: 'switch',
@@ -319,7 +413,7 @@ function createKit() {
     disabled: props.disabled === true || option.disabled === true,
     onClick: () => { if (option.value !== props.value) props.onChange(option.value) },
   }, option.label)))
-  return { SettingsForm, SettingsValueField, Switch, Tag, Button, SegmentedControl }
+  return { SettingsForm, SettingsValueField, Switch, Tag, Button, SegmentedControl, ...icons }
 }
 
 // --- the loader + service doubles -------------------------------------------
@@ -368,7 +462,7 @@ async function loadBundle(options = {}) {
   const source = await readFile(BUNDLE, 'utf8')
   const registrations = []
   const requested = []
-  const kit = createKit()
+  const kit = createKit(options)
   const React = createReact()
   const { document, appended } = makeDocument(options.dom)
   apiAnswers = new Map()
@@ -657,6 +751,233 @@ test('styles itself through design tokens only', async () => {
   // would keep rendering the light-mode value under the dark theme.
   assert.ok(appended[0].textContent.includes('--dsw-alias-'))
   assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(appended[0].textContent), false, 'no literal colours')
+})
+
+/**
+ * The card each settings namespace draws under its title.
+ *
+ * Spelled out rather than derived: which glyph a card wears is a judgement about
+ * what the card means, so a changed icon should have to be re-read here.
+ */
+const CARD_ICON_OF = {
+  'extra-prompt-injection': 'IconContextInjectionOutlineRegular',
+  'extra-subagent-routing': 'IconBranchOutlineRegular',
+  'extra-skill-installer': 'IconSkillOutlineRegular',
+  'extra-rtk-compact': 'IconCompactOutlineRegular',
+  'extra-mcp': 'IconApiOutlineRegular',
+}
+
+test('names only host icons from the pinned set, and actually draws them', async () => {
+  const { plugin, registered } = await boot()
+  const named = Object.values(plain(plugin.HOST_ICON_NAMES))
+  // Pinned, because these names are a dependency on the host's own export list:
+  // a name it does not have is not an error anywhere until it is rendered, and
+  // the page then quietly draws a neutral outline instead of the intended glyph.
+  assert.deepEqual([...named].sort(), HOST_ICON_NAMES)
+  assert.equal(new Set(named).size, named.length, 'no icon may be named twice')
+
+  // The page heading and every feature card carry a host icon — none of them is
+  // left empty, which is what a key missing from HOST_ICON_NAMES would look like.
+  const heading = findAll(renderPage(registered), node => node.props.className === 'dsh-extra-heading')[0]
+  assert.deepEqual(iconsOf(heading), ['IconSlidersTwoOutlineRegular'])
+  // Sizes come from the host's own precedent rather than from eyeballing: 16px is
+  // the size the host uses for a card/section glyph, and the grid is its 16x16 box.
+  const headingIcon = findAll(heading, node => node.type === 'svg')[0]
+  assert.equal(headingIcon.props.width, 16)
+  assert.equal(headingIcon.props.height, 16)
+  assert.equal(headingIcon.props.viewBox, '0 0 16 16')
+  assert.equal(headingIcon.props['aria-hidden'], 'true')
+
+  for (const [ns, icon] of Object.entries(CARD_ICON_OF)) {
+    const title = findAll(renderPage(registered, ns), node => node.props.className === 'dsh-extra-title')[0]
+    assert.ok(title, `no card title for "${ns}"`)
+    assert.deepEqual(iconsOf(title), [icon], `the "${ns}" card must draw its own icon`)
+    assert.equal(findAll(title, node => node.type === 'svg')[0].props.width, 16, `card icons are title-scale`)
+    // The title is a text node plus a decorative glyph, so the name is still the
+    // accessible label rather than an image.
+    assert.ok(textOf(title).trim().length > 0, 'the card title keeps its text')
+  }
+})
+
+test('renders no picture glyphs, in its source or on the page', async () => {
+  // The artifact and the Host-side model that feeds it: neither may carry a
+  // symbol standing in for art. The model is here because it used to prefix its
+  // own badges with one.
+  for (const url of [BUNDLE, new URL('../src/session-dashboard/model.mjs', import.meta.url)]) {
+    const source = await readFile(url, 'utf8')
+    // A narrow allow-list of the punctuation the copy legitimately uses is not
+    // needed: nothing in either file is meant to be outside ASCII, CJK, and the
+    // handful of typographic marks the ranges above exclude.
+    const found = [...new Set(source.match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [])]
+    assert.deepEqual(found, [], `${url.pathname} must draw no picture glyph`)
+  }
+
+  const { registered } = await boot()
+  // Every group's cards, then the dashboard with data that reaches each spot that
+  // used to hold a glyph (meta tags, refresh control, synergy tiles, the
+  // no-rework notice, and one lifecycle event of every kind).
+  for (const ns of Object.keys(CARD_ICON_OF)) {
+    assert.deepEqual(textOf(renderPage(registered, ns)).match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [])
+  }
+  assert.deepEqual(
+    textOf(renderPage(registered, 'skill')).match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [],
+    [],
+    'the Skill manager card is not a namespace and must be checked too',
+  )
+
+  apiAnswers.set('dashboard/data', {
+    ok: true,
+    value: {
+      session: { id: 'sess-glyphs', title: '图标回归', cwd: 'D:/Code/icons' },
+      summary: {
+        eventCount: 3, messages: 2, userMessages: 1, assistantMessages: 1, turns: 2, steps: 2,
+        toolCalls: 1, toolResults: 1, toolFailures: 0,
+        firstEventTime: 1710000000000, lastEventTime: 1710000060000, elapsedMs: 60000,
+      },
+      stats: { llmMs: 40000, toolMs: 10000, ttftMs: 900, decodeMs: 38000, decodeTokens: 1500 },
+      token: {
+        totals: {
+          inputTokens: 4000, outputTokens: 1500, reasoningTokens: 600, totalTokens: 5500,
+          uncachedInputTokens: 1000, cacheReadTokens: 3000, cacheWriteTokens: 0, cacheHitRate: 75,
+        },
+        points: [],
+      },
+      // No repeated commands, so the notice that used to end in U+2713 renders.
+      cost: {
+        toolCalls: 1, toolFailures: 0, toolErrorRate: 0, retries: 0, retriedSteps: 0,
+        wastedTurns: 0, wastedSteps: 0, wastedToolCalls: 0, distinctCommands: 3,
+        repeatedCommands: [], repeatedCommandCalls: 0, repeatedCommandRate: 0,
+        tools: [], turns: [],
+      },
+      turns: [],
+      context: {
+        events: [
+          { seq: 1, turn: 1, step: 1, kind: 'inject', badge: '注入', title: '额外提示词规则注入', details: '注入提示词', deltaTokens: 120 },
+          { seq: 2, turn: 1, step: 1, kind: 'prune', badge: '剪枝', title: '工具 [read] 输出剪枝', details: '截断超长返回', deltaTokens: -800 },
+          { seq: 3, turn: 2, step: 1, kind: 'compact', badge: '压缩', title: '第 2 轮 上下文自动压缩', details: '释放了 1.2k Tokens', deltaTokens: -1200 },
+        ],
+      },
+    },
+  })
+  renderConversationDashboard(registered, { sessionId: 'sess-glyphs' })
+  await settle()
+  await settle()
+  const dashboard = renderConversationDashboard(registered, { sessionId: 'sess-glyphs' })
+  assert.deepEqual(textOf(dashboard).match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [])
+
+  // ...and the glyphs came back as icons: the meta tags, the refresh control, the
+  // four synergy tiles, the no-rework notice, and the three lifecycle kinds.
+  const drawn = iconsOf(dashboard)
+  assert.ok(drawn.includes('IconFolderOpenOutlineRegular'), 'the cwd tag draws a folder')
+  assert.ok(drawn.includes('IconFlatListOutlineRegular'), 'the event-count tag draws a list')
+  assert.ok(drawn.includes('IconClockOutlineRegular'), 'the duration tag draws a clock')
+  assert.ok(drawn.includes('IconRefreshOutlineRegular'), 'the refresh control draws a refresh icon')
+  assert.ok(drawn.includes('IconCheckCircleOutlineRegular'), 'the no-rework notice draws a check')
+  assert.ok(drawn.includes('IconCompactOutlineRegular'), 'rtk tiles and compact events draw the compact icon')
+  assert.ok(drawn.includes('IconApiOutlineRegular'), 'the MCP tile draws the MCP icon')
+  assert.ok(drawn.includes('IconContextInjectionOutlineRegular'), 'the prompt tile draws the injection icon')
+  assert.ok(drawn.includes('IconSkillOutlineRegular'), 'the skills tile draws the skill icon')
+  assert.ok(drawn.includes('IconArchiveOffOutlineRegular'), 'a prune event draws the prune icon')
+
+  // Sizes follow the host's own usage: 12px for inline meta and control glyphs
+  // (its `IconClockOutlineRegular size={12}`, `IconRefreshOutlineRegular size={12}`,
+  // `IconCheckOutlineRegular size={12}`), and 10px inside the event badges, which
+  // are the tightest spot on the page — the host's own smallest chip glyphs are
+  // `IconCloseOutlineRegular size={10}`.
+  const firstWith = (name) => findAll(dashboard, node => node.type === 'svg' && node.props['data-icon'] === name)[0]
+  assert.equal(firstWith('IconFolderOpenOutlineRegular').props.width, 12)
+  assert.equal(firstWith('IconFlatListOutlineRegular').props.width, 12)
+  assert.equal(firstWith('IconClockOutlineRegular').props.width, 12)
+  assert.equal(firstWith('IconRefreshOutlineRegular').props.width, 12)
+  assert.equal(firstWith('IconCheckCircleOutlineRegular').props.width, 12)
+
+  const pruneBadge = findAll(dashboard, node => typeof node.props.className === 'string'
+    && node.props.className.includes('dsh-dash-event-badge')
+    && node.props.className.includes('dsh-badge-prune'))[0]
+  assert.ok(pruneBadge, 'the prune event row must render')
+  const pruneBadgeIcon = findAll(pruneBadge, node => node.type === 'svg')[0]
+  assert.equal(pruneBadgeIcon.props['data-icon'], 'IconArchiveOffOutlineRegular')
+  assert.equal(pruneBadgeIcon.props.width, 10)
+
+  // The badge keeps its own word for what happened, so the model stays readable
+  // without the glyph it no longer ships.
+  assert.ok(textOf(dashboard).includes('剪枝'))
+  assert.ok(textOf(dashboard).includes('压缩'))
+})
+
+test('drops a picture glyph that arrives inside an event badge over the wire', async () => {
+  // The event badge is the one piece of this page's text that comes from the wire,
+  // and the row already draws an icon for `kind` beside it. So a producer still
+  // sending the old `'<scissors> 压缩'` would put a font glyph *and* an icon on one
+  // row — exactly the double-drawing this page no longer does. The renderer is the
+  // last place that can refuse it, so it refuses it here. Built from codepoints so
+  // this file stays free of the glyphs it is defending against.
+  const SCISSORS = String.fromCodePoint(0x2702)
+  const SYRINGE = String.fromCodePoint(0x1F489)
+
+  const { registered } = await boot()
+  apiAnswers.set('dashboard/data', {
+    ok: true,
+    value: {
+      session: { id: 'sess-stale-badge', title: '旧徽章' },
+      summary: { eventCount: 3, turns: 2, steps: 2, elapsedMs: 60000 },
+      stats: {},
+      token: { totals: { inputTokens: 4000, outputTokens: 1500, totalTokens: 5500 }, points: [] },
+      cost: {
+        toolCalls: 1, toolFailures: 0, distinctCommands: 0, repeatedCommands: [],
+        repeatedCommandCalls: 0, repeatedCommandRate: 0, tools: [], turns: [],
+      },
+      turns: [],
+      context: {
+        events: [
+          { seq: 1, turn: 1, step: 1, kind: 'compact', badge: SCISSORS + ' 压缩', title: '压缩', details: '释放了 1.2k Tokens', deltaTokens: -1200 },
+          { seq: 2, turn: 1, step: 1, kind: 'prune', badge: SCISSORS + ' 剪枝', title: '剪枝', details: '截断超长返回', deltaTokens: -800 },
+          { seq: 3, turn: 2, step: 1, kind: 'inject', badge: SYRINGE + ' 注入', title: '注入', details: '注入提示词', deltaTokens: 120 },
+        ],
+      },
+    },
+  })
+  renderConversationDashboard(registered, { sessionId: 'sess-stale-badge' })
+  await settle()
+  await settle()
+  const dashboard = renderConversationDashboard(registered, { sessionId: 'sess-stale-badge' })
+
+  const text = textOf(dashboard)
+  assert.deepEqual(text.match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [],
+    'a stale badge glyph must never reach the page')
+  // The label survives the strip, so the row still says what happened...
+  for (const label of ['压缩', '剪枝', '注入']) assert.ok(text.includes(label), `the "${label}" badge keeps its label`)
+  // ...and the icon is still the one that carries the meaning.
+  const drawn = iconsOf(dashboard)
+  assert.ok(drawn.includes('IconCompactOutlineRegular'))
+  assert.ok(drawn.includes('IconArchiveOffOutlineRegular'))
+  assert.ok(drawn.includes('IconContextInjectionOutlineRegular'))
+})
+
+test('degrades one missing host icon to a neutral outline instead of failing the page', async () => {
+  const { registered } = await boot({}, {}, {}, { missingIcon: 'IconSkillOutlineRegular' })
+  const title = findAll(renderPage(registered, 'extra-skill-installer'), node => node.props.className === 'dsh-extra-title')[0]
+  assert.ok(title, 'the card still renders without its host icon')
+
+  const drawn = findAll(title, node => node.type === 'svg')
+  assert.equal(drawn.length, 1, 'the card still draws exactly one glyph')
+  // The fallback is drawn, not borrowed: no host marker, the host's own 16x16
+  // box and `currentColor` stroke. A missing component handed to `createElement`
+  // would instead have thrown "Element type is invalid" and taken the whole
+  // settings section down.
+  assert.equal(drawn[0].props['data-icon'], undefined)
+  assert.equal(drawn[0].props.viewBox, '0 0 16 16')
+  assert.equal(drawn[0].props.fill, 'none')
+  assert.ok(textOf(title).includes('Skill 安装'), 'the card keeps its title')
+})
+
+test('accepts a host icon wrapped in memo/forwardRef rather than falling back', async () => {
+  const { registered } = await boot({}, {}, {}, { wrapIcon: 'IconCompactOutlineRegular' })
+  const title = findAll(renderPage(registered, 'extra-rtk-compact'), node => node.props.className === 'dsh-extra-title')[0]
+  // A wrapper object is still a component type. Treating it as missing would
+  // downgrade every icon to the fallback the day the host memoises them, which
+  // looks like a broken theme rather than a broken lookup.
+  assert.deepEqual(iconsOf(title), ['IconCompactOutlineRegular'])
 })
 
 test('the page edits exactly the namespaces the shipped rows mount', async () => {
@@ -1252,12 +1573,16 @@ test('registers conversation.view slot for in-session dashboard tab', async () =
 })
 
 test('conversation dashboard detects active model from DOM composer and rejects header team labels', async () => {
+  // The header's own label, as the host writes it (`ui-agent-preset`'s zh
+  // dictionary: `trigger: '智能体团队'`). It is the exact string the detector has
+  // to refuse, so a fixture of our own invention would test nothing.
+  const TEAM_LABEL = '智能体团队'
   const headerMenuBtn = {
     tagName: 'BUTTON',
     className: 'header-mode-trigger',
-    title: '👥 智能体团队',
-    attributes: { 'aria-haspopup': 'menu', title: '👥 智能体团队' },
-    textContent: '👥 智能体团队',
+    title: TEAM_LABEL,
+    attributes: { 'aria-haspopup': 'menu', title: TEAM_LABEL },
+    textContent: TEAM_LABEL,
     children: [],
   }
 
@@ -1294,9 +1619,8 @@ test('conversation dashboard detects active model from DOM composer and rejects 
 
   const { registered, plugin } = await boot(undefined, undefined, undefined, { dom })
 
-  // 1. Assert isLikelyModelName rejects '智能体团队' and variants, but accepts 'gemini-3.8-flash-high'
-  assert.equal(plugin.isLikelyModelName('智能体团队'), false)
-  assert.equal(plugin.isLikelyModelName('👥 智能体团队'), false)
+  // 1. Assert isLikelyModelName rejects the header's own labels, but accepts 'gemini-3.8-flash-high'
+  assert.equal(plugin.isLikelyModelName(TEAM_LABEL), false)
   assert.equal(plugin.isLikelyModelName('标准模式'), false)
   assert.equal(plugin.isLikelyModelName('当前模型'), false)
   assert.equal(plugin.isLikelyModelName('gemini-3.8-flash-high'), true)
