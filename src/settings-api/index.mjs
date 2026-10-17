@@ -1,9 +1,15 @@
 // The settings page's data channel.
 //
-// The page shows two things that are not configuration and cannot be read from a
-// config namespace: the registry of Skills this package installed, which is a file
-// next to the profile written by `skill-installer`, and whether this machine has the
-// `rtk` executable at all. The browser cannot read either of them.
+// The page shows three things that are not configuration and cannot be read from a
+// config namespace: the Skills the model can actually read, which of them this
+// package installed (a file next to the profile written by `skill-installer`), and
+// whether this machine has the `rtk` executable at all. The browser cannot read any
+// of them.
+//
+// The Skill list is answered by the Host's own `skills` registry — the one the
+// `skill` tool and the per-step catalog read — queried once per mounted workspace,
+// so the page and the model cannot disagree about which directories count. See
+// `./catalog.mjs` for the assembly and `readSkillViews` below for the query.
 //
 // DSH's own client-to-host path is the generated Remote API, and an out-of-tree
 // JavaScript plugin cannot join it — that path needs Typert strict codecs, a
@@ -31,7 +37,8 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveDshHome, resolveDshProfileDir } from '../shared/dsh-home.mjs';
 import { listManagedSkills, uninstallManagedSkill } from '../skill-installer/manage.mjs';
-import { listSessionsFromHost, readSessionDashboardFromHost } from '../session-dashboard/model.mjs';
+import { readSessionDashboardFromHost } from '../session-dashboard/model.mjs';
+import { assembleSkillCatalog } from './catalog.mjs';
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'extra-settings-api';
@@ -41,6 +48,9 @@ export const inject = ['connection'];
 
 /** The exact path this plugin owns below `/api`. */
 export const PATH = '/api/extra-prompt';
+
+/** Ceiling on the distinct workspaces one `skills/list` read queries. */
+export const MAX_WORKSPACES = 8;
 
 /**
  * Wrap a failure in the shape the page can read.
@@ -63,6 +73,181 @@ function rootsOf(ctx) {
     destRoot: join(resolveDshHome(ctx), 'skills'),
     profileDir: resolveDshProfileDir(ctx),
   };
+}
+
+/**
+ * Read a service without declaring it as an injected dependency.
+ *
+ * This row's only hard dependency is `connection`: it must settle on the Web
+ * transport, and it must keep working on a Host that has no session store or no
+ * Skill registry. `ctx.get()` is the non-injecting accessor for exactly that —
+ * the same seam `skill-installer` uses for `ctx.get('skills')`.
+ *
+ * @param ctx - the plugin's host context.
+ * @param name - the service name.
+ * @returns the live service, or `undefined`.
+ */
+function serviceOf(ctx, name) {
+  if (typeof ctx?.get !== 'function') return undefined;
+  const service = ctx.get(name);
+  return service === undefined || service === null ? undefined : service;
+}
+
+/**
+ * The registry instance and view scope one session's own Skill lookup uses.
+ *
+ * This reproduces the official resolution of `skill.list` (`api-proxy.ts`), and it
+ * is the difference between "some Skills" and "the Skills this model can read".
+ * The registry is layered per scope, and an agent preset mounts
+ * `skill-filesystem` into its own layer — the stock `standard` preset does
+ * exactly that — so a read with no scope sees only what the host composition
+ * registered globally: no `.dsh/skills`, no `.agents/skills`, no bundled root.
+ *
+ * A live agent *is* the scope, because its chain passes through its preset's
+ * standing layer. A session that is not live resolves its preset's standing key,
+ * which composes the preset without resuming any agent, session, or turn. An
+ * unknown or unusable preset degrades to the global layer, never to a failure.
+ *
+ * @param ctx - the plugin's host context.
+ * @param sessionId - the session's id, when it has one.
+ * @param agentPreset - the preset recorded for that session, if any.
+ * @returns the scope to pass to `list()` and the registry instance to call.
+ */
+async function skillViewOf(ctx, sessionId, agentPreset) {
+  const agents = serviceOf(ctx, 'agents');
+  const live = sessionId === undefined || typeof agents?.get !== 'function' ? undefined : agents.get(sessionId);
+  if (live !== undefined) {
+    // A composition may realm-mount its own registry; a live agent is the only
+    // address for that instance. The host instance otherwise serves every scope,
+    // its layers keyed by the scope passed to `list`.
+    const presets = serviceOf(ctx, 'agentPresets');
+    const scoped = typeof presets?.serviceFor === 'function' ? presets.serviceFor(live, 'skills') : undefined;
+    return { scope: live, registry: scoped ?? serviceOf(ctx, 'skills') };
+  }
+  const presets = serviceOf(ctx, 'agentPresets');
+  if (presets === undefined || typeof presets.standingKeyFor !== 'function') {
+    return { scope: undefined, registry: serviceOf(ctx, 'skills') };
+  }
+  try {
+    return { scope: await presets.standingKeyFor(agentPreset), registry: serviceOf(ctx, 'skills') };
+  } catch {
+    // Swallows only the roster's unknown/unusable-preset rejection: a deleted or
+    // broken preset must degrade this read, exactly as it degrades the official one.
+    return { scope: undefined, registry: serviceOf(ctx, 'skills') };
+  }
+}
+
+/**
+ * The workspaces this Host has mounted, each with the scope that makes the read
+ * equal to the model's own lookup.
+ *
+ * A mounted workspace is a live session's header cwd: that is the path the
+ * model's Skill lookup is made with, so it is the only answer comparable with
+ * what the model reads. When no session is live — the settings page can be
+ * opened before the first message — the most recently updated stored session
+ * stands in, and failing that there is no workspace at all and the user-level
+ * and bundled roots are read through the default preset's standing scope.
+ *
+ * @param ctx - the plugin's host context.
+ * @returns read targets, at most {@link MAX_WORKSPACES}, workspaces first.
+ */
+export async function resolveSkillTargets(ctx) {
+  const candidates = [];
+  const add = (candidate) => {
+    if (candidates.length >= MAX_WORKSPACES) return;
+    if (candidates.some(existing => existing.cwd === candidate.cwd)) return;
+    candidates.push(candidate);
+  };
+  const sessions = serviceOf(ctx, 'sessions');
+  if (sessions !== undefined) {
+    const live = typeof sessions.list === 'function'
+      ? sessions.list()
+      : typeof sessions.values === 'function' ? [...sessions.values()] : [];
+    for (const session of Array.isArray(live) ? live : []) {
+      const cwd = session?.header?.cwd;
+      if (typeof cwd !== 'string' || cwd === '') continue;
+      add({ cwd, sessionId: session?.id, agentPreset: session?.header?.agentPreset });
+    }
+  }
+  if (candidates.length === 0) {
+    const sessionQuery = serviceOf(ctx, 'sessionQuery');
+    if (sessionQuery !== undefined && typeof sessionQuery.listSessions === 'function') {
+      try {
+        const records = await sessionQuery.listSessions();
+        const recency = record => record?.header?.updatedAt ?? record?.updatedAt ?? record?.header?.time ?? 0;
+        const sorted = (Array.isArray(records) ? [...records] : []).sort((a, b) => recency(b) - recency(a));
+        for (const record of sorted) {
+          const cwd = record?.header?.cwd ?? record?.cwd;
+          if (typeof cwd !== 'string' || cwd === '') continue;
+          add({ cwd, sessionId: record?.header?.id ?? record?.id, agentPreset: record?.header?.agentPreset });
+        }
+      } catch {
+        // A storage backend that cannot list sessions must not fail the card; the
+        // default preset below is still a usable read.
+      }
+    }
+  }
+  if (candidates.length === 0) add({ cwd: undefined, sessionId: undefined, agentPreset: undefined });
+  const targets = [];
+  for (const candidate of candidates) {
+    targets.push({ ...candidate, ...await skillViewOf(ctx, candidate.sessionId, candidate.agentPreset) });
+  }
+  // A Host that composes neither sessions nor presets still has a working
+  // directory, which is the workspace a CLI launch implies — and with no scope it
+  // is the only read that can see a globally mounted provider at all.
+  if (targets.length === 1 && targets[0].cwd === undefined && targets[0].scope === undefined) {
+    try {
+      targets[0] = { ...targets[0], cwd: process.cwd() };
+    } catch {
+      // `process.cwd()` throws only when the directory was deleted under a
+      // running process; that is not a reason to fail the read.
+    }
+  }
+  return targets;
+}
+
+/**
+ * Query the Host's Skill registry once per read target.
+ *
+ * This is the whole point of the card: `ctx.skills` is the registry the `skill`
+ * tool and the per-step catalog read, queried with the same cwd and the same
+ * scope, so its answer — project `.dsh/skills` and `.agents/skills`, user
+ * `$DSH_HOME/skills` and `~/.agents/skills`, custom and bundled roots, plugin
+ * runtime Skills, with one winner per name — is by construction the list the
+ * model can read. Nothing here walks a directory or parses frontmatter.
+ *
+ * @param ctx - the plugin's host context.
+ * @returns the views to merge, whether the registry exists, and the caveats.
+ */
+export async function readSkillViews(ctx) {
+  const targets = await resolveSkillTargets(ctx);
+  const fallback = serviceOf(ctx, 'skills');
+  const usable = service => service !== undefined && typeof service.list === 'function';
+  if (!usable(fallback) && !targets.some(target => usable(target.registry))) {
+    return {
+      catalogAvailable: false,
+      views: [],
+      notes: ['这个宿主没有 skills 注册表，只能列出本插件安装的 Skill。'],
+    };
+  }
+  const notes = [];
+  const views = [];
+  for (const target of targets) {
+    const registry = usable(target.registry) ? target.registry : fallback;
+    const options = target.cwd === undefined
+      ? { scope: target.scope }
+      : { cwd: target.cwd, scope: target.scope };
+    try {
+      views.push({ cwd: target.cwd, preset: target.agentPreset, skills: await registry.list(options) });
+    } catch (error) {
+      const where = target.cwd === undefined ? '用户级目录' : `工作区 ${target.cwd}`;
+      notes.push(`${where} 的 Skill 读取失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (targets.every(target => target.cwd === undefined)) {
+    notes.push('当前没有已挂载的工作区，只列出不依赖工作区的 Skill（用户级与内置目录）。');
+  }
+  return { catalogAvailable: true, views, notes };
 }
 
 /**
@@ -135,8 +320,27 @@ function operationsOf(ctx) {
       return { ok: true, value: await rtkStatus(ctx, configured) };
     },
     'skills/list': async () => {
-      const roots = rootsOf(ctx);
-      return { ok: true, value: { skills: await listManagedSkills(roots) } };
+      const catalog = await readSkillViews(ctx);
+      const notes = [...catalog.notes];
+      // The install registry is profile state, so an unmounted profile means the
+      // provenance is unknown — not that the catalog is unreadable. The catalog is
+      // still reported, the uninstall metadata is not, and the reason travels as a
+      // note instead of failing the whole read.
+      let managed = [];
+      try {
+        managed = await listManagedSkills(rootsOf(ctx));
+      } catch (error) {
+        notes.push(error instanceof Error ? error.message : String(error));
+      }
+      return {
+        ok: true,
+        value: assembleSkillCatalog({
+          views: catalog.views,
+          managed,
+          catalogAvailable: catalog.catalogAvailable,
+          notes,
+        }),
+      };
     },
     'skills/remove': async (body) => {
       const roots = rootsOf(ctx);
@@ -151,14 +355,6 @@ function operationsOf(ctx) {
         return { ok: true, value: { removed } };
       } catch (error) {
         return failure('extra-prompt/skill-not-removed', error instanceof Error ? error.message : String(error));
-      }
-    },
-    'dashboard/sessions': async () => {
-      try {
-        const sessions = await listSessionsFromHost(ctx);
-        return { ok: true, value: { sessions } };
-      } catch (error) {
-        return failure('extra-prompt/dashboard-sessions-failed', error instanceof Error ? error.message : String(error));
       }
     },
     'dashboard/data': async (body) => {
