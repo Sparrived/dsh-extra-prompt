@@ -58,8 +58,7 @@ export function validateGitRef(value) {
 }
 
 /**
- * The approval gate for one Skill install, folded from the session's durable
- * `approval/policy` events and the approval service's configured default.
+ * The approval gate for one Skill install.
  *
  * - `'ask'` — prompt through the approval service (per-session consent).
  * - `'skip'` — the user's own `'never'` policy (e.g. the danger-full-access
@@ -68,24 +67,25 @@ export function validateGitRef(value) {
  * - `'reject'` — a delegation-pinned `'never'` must not install unattended;
  *   deterministic rejection keeps the delegated child inside its scope.
  *
- * The last event wins; an event without `source: 'delegation'` is a runtime or
- * initialization switch, i.e. user intent.
- * @param events - the agent session's durable events in log order.
- * @param defaultPolicy - the approval service's configured policy when the
- *   log records no override.
+ * The override comes from {@link ApprovalService.overrideOf}, the approval
+ * service's own durable `approval/policy` fold: `Session` exposes no event
+ * array, and a second fold here could disagree with the policy the service's
+ * `request()` actually applies. Delegation is identified by the session
+ * header's durable delegation depth — every delegated child is pinned to
+ * `'never'` at the delegation boundary, so `'never'` there is a scope cap,
+ * never user consent.
+ *
+ * @param approval - the live approval service (`ctx.get('approval')`).
+ * @param session - the executing agent's session.
  * @returns the gate decision for this install.
  */
-export function skillInstallGate(events, defaultPolicy) {
-  let policy
-  let delegated = false
-  for (const event of events ?? []) {
-    if (event?.type !== 'approval/policy') continue
-    policy = event.data?.policy
-    delegated = event.data?.source === 'delegation'
+export function skillInstallGate(approval, session) {
+  if (typeof approval?.overrideOf !== 'function') {
+    throw new Error('skill-install requires a DSH approval service that exposes overrideOf(session)')
   }
-  const effective = policy ?? defaultPolicy ?? 'ask'
-  if (effective === 'never') return delegated ? 'reject' : 'skip'
-  return 'ask'
+  const policy = approval.overrideOf(session) ?? approval.config?.policy ?? 'ask'
+  if (policy !== 'never') return 'ask'
+  return (session?.header?.delegationDepth ?? 0) > 0 ? 'reject' : 'skip'
 }
 
 function githubHeaders(accept = 'application/vnd.github+json') {

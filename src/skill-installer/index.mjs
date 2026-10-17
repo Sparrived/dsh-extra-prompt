@@ -97,7 +97,7 @@ export function apply(ctx, config) {
       if (!exec.agent) throw new Error('skill-install requires an active agent session')
       const approval = ctx.get('approval')
       if (!approval?.request) throw new Error('skill-install requires the DSH approval service')
-      const gate = skillInstallGate(exec.agent.session.events, approval.config?.policy)
+      const gate = skillInstallGate(approval, exec.agent.session)
       if (gate === 'reject') {
         throw new Error('Skill installation was rejected because approval prompts are disabled for delegated sessions; report this limitation to the parent instead of retrying.')
       }

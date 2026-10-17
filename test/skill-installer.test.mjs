@@ -75,23 +75,41 @@ test('rejects unsafe Git refs while preserving legal branch and commit forms', (
   }
 })
 
-test('gates Skill install on the session approval policy', () => {
-  const policy = (policy, source) => ({ type: 'approval/policy', data: source === undefined ? { policy } : { policy, source } })
-  const unrelated = { type: 'turn/start', data: {} }
+test('gates Skill install on the session approval policy and delegation depth', () => {
+  // A fake approval service: the gate must read the policy through its durable
+  // overrideOf() fold, never through a (`Session` has no) session event array.
+  const approval = (override, defaultPolicy) => ({
+    config: defaultPolicy === undefined ? {} : { policy: defaultPolicy },
+    overrideOf: () => override,
+  })
+  const top = { header: {} }
+  const child = { header: { delegationDepth: 2 } }
+
   // Default ask: interactive approval.
-  assert.equal(skillInstallGate([], undefined), 'ask')
-  assert.equal(skillInstallGate([policy('ask')], undefined), 'ask')
+  assert.equal(skillInstallGate(approval(undefined, undefined), top), 'ask')
+  assert.equal(skillInstallGate(approval('ask', undefined), top), 'ask')
   // A user-chosen never (e.g. the full-access preset) is global consent: skip the prompt.
-  assert.equal(skillInstallGate([policy('never')], 'ask'), 'skip')
-  assert.equal(skillInstallGate([policy('never')], undefined), 'skip')
+  assert.equal(skillInstallGate(approval('never', 'ask'), top), 'skip')
+  assert.equal(skillInstallGate(approval('never', undefined), top), 'skip')
   // A never policy from the approval service default is deployment/user intent too.
-  assert.equal(skillInstallGate([], 'never'), 'skip')
-  // A delegation-pinned never must not install unattended.
-  assert.equal(skillInstallGate([policy('never', 'delegation')], 'ask'), 'reject')
-  assert.equal(skillInstallGate([policy('never', 'delegation')], undefined), 'reject')
-  // The last override wins.
-  assert.equal(skillInstallGate([policy('never', 'delegation'), policy('ask')], undefined), 'ask')
-  assert.equal(skillInstallGate([policy('never', 'delegation'), unrelated, policy('never')], undefined), 'skip')
+  assert.equal(skillInstallGate(approval(undefined, 'never'), top), 'skip')
+  // An ask override wins over a never deployment default.
+  assert.equal(skillInstallGate(approval('ask', 'never'), top), 'ask')
+
+  // A delegation-pinned never must not install unattended: the child seed wins
+  // over the configured default.
+  assert.equal(skillInstallGate(approval('never', 'ask'), child), 'reject')
+  assert.equal(skillInstallGate(approval('never', undefined), child), 'reject')
+  assert.equal(skillInstallGate(approval(undefined, 'never'), child), 'reject')
+  // A later switch to ask still wins in a child.
+  assert.equal(skillInstallGate(approval('ask', 'never'), child), 'ask')
+
+  // Without the durable fold there is no safe answer; silently falling back to
+  // the configured default is exactly the "always ask" bug this gate prevents.
+  assert.throws(
+    () => skillInstallGate({ config: { policy: 'never' } }, top),
+    /overrideOf/,
+  )
 })
 
 test('downloads, validates, copies, and marks a Skill before the commit rename', async () => {
