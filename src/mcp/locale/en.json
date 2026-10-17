@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP Servers",
+    "description": "Composes one official dsh-mcp-client instance per server, exposing its tools as mcp__<server>__<tool>."
+  }
+}

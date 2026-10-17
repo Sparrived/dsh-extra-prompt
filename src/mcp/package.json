@@ -1,0 +1,5 @@
+{
+  "name": "extra-mcp",
+  "description": "Composes one official dsh-mcp-client instance per server, exposing its tools as mcp__<server>__<tool>.",
+  "icon": "./icon.svg"
+}

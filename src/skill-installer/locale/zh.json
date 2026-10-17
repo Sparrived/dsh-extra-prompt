@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Skill 安装",
+    "description": "提供 skill-install 工具，从 GitHub 仓库或目录 URL 安装 Skill。"
+  }
+}

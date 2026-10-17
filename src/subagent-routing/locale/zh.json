@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "子代理路由",
+    "description": "把「哪类任务交给哪个模型」写进 system prompt 与模型目录说明。"
+  }
+}

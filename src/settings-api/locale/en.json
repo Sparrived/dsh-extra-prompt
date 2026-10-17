@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Page Data Channel",
+    "description": "Answers the read-only /api/extra-prompt requests behind the settings page: the model-visible Skill list and the rtk probe."
+  }
+}

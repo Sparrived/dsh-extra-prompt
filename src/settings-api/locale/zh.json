@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "页面数据通道",
+    "description": "回答设置页背后的只读 /api/extra-prompt 请求：模型可见的 Skill 名单与 rtk 探测。"
+  }
+}

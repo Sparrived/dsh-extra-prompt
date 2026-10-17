@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "main": "./src/index.mjs",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./src/index.mjs",
     "./prompt-injection": "./src/prompt-injection/index.mjs",
@@ -15,6 +16,21 @@
     "./session-dashboard": "./src/session-dashboard/index.mjs",
     "./settings-api": "./src/settings-api/index.mjs",
     "./web-search-tavily": "./src/web-search-tavily/index.mjs",
+    "./prompt-injection/package.json": "./src/prompt-injection/package.json",
+    "./prompt-injection/locale/*.json": "./src/prompt-injection/locale/*.json",
+    "./subagent-routing/package.json": "./src/subagent-routing/package.json",
+    "./subagent-routing/locale/*.json": "./src/subagent-routing/locale/*.json",
+    "./skill-installer/package.json": "./src/skill-installer/package.json",
+    "./skill-installer/locale/*.json": "./src/skill-installer/locale/*.json",
+    "./rtk-compact/package.json": "./src/rtk-compact/package.json",
+    "./rtk-compact/locale/*.json": "./src/rtk-compact/locale/*.json",
+    "./mcp/package.json": "./src/mcp/package.json",
+    "./mcp/locale/*.json": "./src/mcp/locale/*.json",
+    "./settings-api/package.json": "./src/settings-api/package.json",
+    "./settings-api/locale/*.json": "./src/settings-api/locale/*.json",
+    "./web-search-tavily/package.json": "./src/web-search-tavily/package.json",
+    "./web-search-tavily/locale/*.json": "./src/web-search-tavily/locale/*.json",
+    "./locale/*.json": "./locale/*.json",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
@@ -31,6 +47,8 @@
   },
   "files": [
     "src",
+    "locale/*.json",
+    "icon.svg",
     "lib/client.js",
     "cordis.patch.yml",
     "README.md"

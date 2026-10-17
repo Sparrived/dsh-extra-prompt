@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "全局提示词注入",
+    "description": "在每个 Session step 之前注入一段固定上下文。"
+  }
+}

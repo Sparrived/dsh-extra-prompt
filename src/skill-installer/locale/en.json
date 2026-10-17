@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Skill Installer",
+    "description": "Offers the skill-install tool, which installs a Skill from a GitHub repository or directory URL."
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "extra-settings-api",
+  "description": "Answers the read-only /api/extra-prompt requests behind the settings page: the model-visible Skill list and the rtk probe.",
+  "icon": "./icon.svg"
+}

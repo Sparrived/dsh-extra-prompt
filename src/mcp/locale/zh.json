@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP 服务器",
+    "description": "每台服务器组合一个官方 dsh-mcp-client 实例，工具以 mcp__<服务器名>__<工具名> 交给模型。"
+  }
+}

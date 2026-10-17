@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "rtk Output Compaction",
+    "description": "Pipes git, rg and grep shell output through rtk before the model sees it."
+  }
+}

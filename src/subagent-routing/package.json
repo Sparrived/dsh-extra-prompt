@@ -1,0 +1,5 @@
+{
+  "name": "extra-subagent-routing",
+  "description": "Writes which model a kind of task goes to into the system prompt and the model catalog.",
+  "icon": "./icon.svg"
+}

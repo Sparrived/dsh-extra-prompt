@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh-extra-prompt",
+    "description": "提示词注入、子代理路由、Skill 安装、rtk 输出压缩、MCP 接入与会话看板，每项一行插件，可在「插件」页逐行开关。"
+  }
+}

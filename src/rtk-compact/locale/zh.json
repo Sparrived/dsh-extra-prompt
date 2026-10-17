@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "rtk 输出压缩",
+    "description": "把 git / rg / grep 的 shell 输出交给 rtk 压缩后再交给模型。"
+  }
+}

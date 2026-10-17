@@ -1,0 +1,5 @@
+{
+  "name": "extra-prompt-injection",
+  "description": "Injects one standing context message before every Session step.",
+  "icon": "./icon.svg"
+}
