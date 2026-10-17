@@ -1,29 +1,44 @@
 # dsh-extra-prompt — the rows this package contributes to a profile.
 #
-# Every row id doubles as its settings namespace and as the exported plugin
-# `name`, which is the DSH convention and is what lets the Web UI settings page
-# address each namespace by id.
+# Every row is one feature, and the row switch on the 「插件」 page is that feature's
+# on/off control: the page writes `disabled: true` for this row into the profile
+# patch and the loader disposes (or mounts) the row's fiber. There is deliberately
+# no `enabled` field in any of their Config schemas — one switch, in one place, that
+# takes the feature's tool, injection, prompt section and catalog edits with it.
+#
+# Each row id doubles as its settings namespace and as the exported plugin `name`,
+# which is the DSH convention and is what lets the Web UI settings page address each
+# namespace by id. The settings page edits configuration only; it has no switch.
+#
+# Each row also carries its own display metadata, read by the plugins page without
+# evaluating the plugin: `<row directory>/package.json` (a `name`, a `description`
+# and an `icon`) plus `locale/en.json` and `locale/zh.json` holding the title and
+# description the page shows. Those files live beside each entry in `src/`, and the
+# exports in package.json are what make them reachable.
 #
 # The first row is mounted from the BARE package name on purpose: `client-modules`
 # attaches a package's browser half to the row whose specifier is the bare package
-# name, and a row mounted from a subpath export never carries a half. The five rows
-# after it are host-only, split from each other because their Cordis `inject` sets
-# differ — one plugin could not serve all five:
+# name, and a row mounted from a subpath export never carries a half. That half owns
+# both the settings page and the in-session dashboard, so switching THIS row off
+# removes the page and the dashboard tab with it, and the other rows' settings
+# become uneditable until it is switched back on.
+#
+# The five host-only rows after it are split from each other because their Cordis
+# `inject` sets differ — one plugin could not serve all five:
 #
 #   extra-prompt-injection        no inject (prompt assembly only)
-#   extra-subagent-routing        settings, systemPrompt
-#   extra-skill-guide             skills
+#   extra-subagent-routing        settings, systemPrompt (reads ctx.get('llm') for
+#                                 the catalog projection when one is registered)
 #   extra-skill-installer         tools
 #   extra-rtk-compact             subprocess, timer
 #   extra-mcp                     tools
 #
-# The last row is the settings page's data channel. It has no settings namespace
-# of its own and its id is not one: it exists to answer the page, and it is separate
-# because `inject: ['connection']` never settles on a host without a web transport —
-# a feature row must not wait on that.
-#
-# Disabling any single row is the supported coarse switch for that feature; the
-# settings page is the fine-grained one.
+# The last two rows are not settings rows. `extra-settings-api` is the settings
+# page's data channel: it has no settings namespace of its own and its id is not
+# one, and it is separate because `inject: ['connection']` never settles on a host
+# without a web transport — a feature row must not wait on that. The
+# `extra-web-search-tavily` row only registers a search provider with the web
+# service.
 
 - insert:
     - id: extra-prompt

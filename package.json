@@ -1,7 +1,7 @@
 {
   "name": "dsh-extra-prompt",
   "version": "0.1.0",
-  "description": "Prompt injection, subagent routing, skill guide, skill installer and rtk output compaction for DSH, with a settings page in the Web UI",
+  "description": "Prompt injection, subagent routing, Skill install, rtk output compaction, MCP servers and a session dashboard for DSH — one switchable plugin row each, configured from a settings page in the Web UI",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.mjs",
