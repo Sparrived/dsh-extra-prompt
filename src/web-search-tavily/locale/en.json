@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tavily Search Provider",
+    "description": "Registers a web search provider with id tavily, used when ctx.web names tavily as its search provider."
+  }
+}

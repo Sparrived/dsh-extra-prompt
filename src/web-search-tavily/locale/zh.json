@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tavily 搜索源",
+    "description": "向 ctx.web 注册 id 为 tavily 的搜索提供方，供 web.searchProvider 设为 tavily 时使用。"
+  }
+}

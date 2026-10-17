@@ -1,0 +1,5 @@
+{
+  "name": "extra-web-search-tavily",
+  "description": "Registers a web search provider with id tavily, used when ctx.web names tavily as its search provider.",
+  "icon": "./icon.svg"
+}

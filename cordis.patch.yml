@@ -46,3 +46,6 @@
 
     - id: extra-settings-api
       name: 'dsh-extra-prompt/settings-api'
+
+    - id: extra-web-search-tavily
+      name: 'dsh-extra-prompt/web-search-tavily'
