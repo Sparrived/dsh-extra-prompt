@@ -9,7 +9,6 @@
     ".": "./src/index.mjs",
     "./prompt-injection": "./src/prompt-injection/index.mjs",
     "./subagent-routing": "./src/subagent-routing/index.mjs",
-    "./skill-guide": "./src/skill-guide/index.mjs",
     "./skill-installer": "./src/skill-installer/index.mjs",
     "./rtk-compact": "./src/rtk-compact/index.mjs",
     "./mcp": "./src/mcp/index.mjs",

@@ -35,9 +35,6 @@
     - id: extra-subagent-routing
       name: 'dsh-extra-prompt/subagent-routing'
 
-    - id: extra-skill-guide
-      name: 'dsh-extra-prompt/skill-guide'
-
     - id: extra-skill-installer
       name: 'dsh-extra-prompt/skill-installer'
 
