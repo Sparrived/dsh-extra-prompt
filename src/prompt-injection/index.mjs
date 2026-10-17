@@ -5,11 +5,13 @@
 // merged into the system prompt, so it stays separately visible in the session
 // trajectory and is attributed to this plugin's own source kind.
 //
-// An empty text appends nothing, so clearing the field also switches injection
-// off; the explicit `enabled` switch exists so one consolidated settings card can
-// turn every feature of this package on and off the same way. Disabling it is not
-// a silent stop: the text already injected is withdrawn through the same clearing
-// path, so the model learns the earlier injection no longer applies.
+// An empty text appends nothing, so clearing the field is itself a switch for
+// the injection. The feature's on/off switch is the profile row's own: the
+// 「插件」 page disables `extra-prompt-injection`, and the fiber — with this
+// listener on it — is disposed. Injected content is durable session history, so
+// a row switched off stops appending instead of rewriting what the model has
+// already read; clearing the field in a live session still appends the explicit
+// "no longer applies" notice through the same clearing path.
 //
 // The value is read while each step is assembled, so a change applies to
 // already-open sessions; only a real change appends, so unchanged steps never
@@ -27,11 +29,8 @@ import { injectionMessage, isInjectionSource, nextInjection, PROMPT_NAMESPACE } 
 
 export const name = PROMPT_NAMESPACE
 
-/** Live-editable switch and injected text; `role('textarea')` renders it multi-line. */
+/** Live-editable injected text; `role('textarea')` renders it multi-line. */
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true)
-    .description('Inject the text below before every Session step')
-    .volatile(),
   text: Schema.string().role('textarea').description('Injected before every Session step as its own context message').default('').volatile(),
 })
 
@@ -62,10 +61,9 @@ export function apply(ctx, config) {
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
-    // A disabled plugin wants no injection, which is exactly what an empty body
-    // means here: the clearing path withdraws what was already sent, once.
-    const wanted = config.enabled.get() ? config.text.get() : ''
-    const text = nextInjection(lastInjection(agent.session, name), wanted)
+    // An empty text is "no injection", which is exactly what the clearing path
+    // means; the feature itself is switched off by disabling its profile row.
+    const text = nextInjection(lastInjection(agent.session, name), config.text.get())
     if (text === undefined) return decision
     return {
       ...decision,

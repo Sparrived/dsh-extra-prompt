@@ -15,6 +15,10 @@
 // - Compression is opt-in per command. rtk's content-sniffing default is never
 //   used, because a misdetected filter silently discards information.
 //
+// The feature's on/off switch is the profile row's own: disabling
+// `extra-rtk-compact` in the 「插件」 page disposes the fiber and this listener
+// with it, so nothing is filtered afterwards.
+//
 // The listener reads the canonical blocks from `result.content`: a waterfall
 // `next()` that accepts without replacing content returns `{ kind: 'accept' }`
 // with no `content` property of its own.
@@ -35,9 +39,6 @@ export const name = 'extra-rtk-compact'
 export const inject = ['subprocess', 'timer']
 
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true)
-    .description('Pipe shell tool output through rtk before the model sees it')
-    .volatile(),
   rtkPath: Schema.string().default('')
     .description('Absolute path to the rtk executable; empty resolves `rtk` from PATH')
     .volatile(),
@@ -75,7 +76,7 @@ export function apply(ctx, config) {
   // correcting a bad path mid-session.
   let executablePromise
 
-  /** Whether the "enabled, but this machine has no rtk" warning has been logged. */
+  /** Whether the "mounted, but this machine has no rtk" warning has been logged. */
   let warnedMissing = false
 
   const resolveExecutable = () => {
@@ -88,10 +89,10 @@ export function apply(ctx, config) {
       // indistinguishable from the feature working on already-compact output. Say it
       // once, rather than leaving an operator to wonder why nothing is compressed.
       void executablePromise.then((path) => {
-        if (path !== undefined || warnedMissing || !config.enabled.get()) return
+        if (path !== undefined || warnedMissing) return
         warnedMissing = true
         ctx.logger?.warn?.(
-          'rtk-compact 已启用，但本机没有找到 rtk 可执行文件，工具输出将原样通过；'
+          'rtk-compact 这一行已挂载，但本机没有找到 rtk 可执行文件，工具输出将原样通过；'
           + '安装 rtk，或在本功能的设置里指定 rtkPath。刚装完 rtk 时，需要重启一次才会拿到新的 PATH。',
         )
       })
@@ -162,9 +163,6 @@ export function apply(ctx, config) {
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
     if (decision.kind !== 'accept') return decision
-    // Disabled is read per result, like every other tunable, so switching it off
-    // takes effect on the next command instead of at the next restart.
-    if (!config.enabled.get()) return decision
     if (exec.name !== 'pwsh' && exec.name !== 'bash') return decision
     if (result.isError === true) return decision
 

@@ -43,9 +43,6 @@ export const name = 'extra-mcp'
 export const inject = ['tools']
 
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true)
-    .description('Connect the enabled MCP servers')
-    .volatile(),
   servers: Schema.array(Schema.object({
     serverName: Schema.string().default(''),
     enabled: Schema.boolean().default(false),
@@ -173,15 +170,18 @@ function instancesOf(ctx, documentOf) {
  */
 export function apply(ctx, config) {
   // Read through the config object rather than a captured array, so a volatile
-  // update is visible to the next reconcile.
-  const documentOf = () => (config.enabled.get() ? config.servers.get() : [])
+  // update is visible to the next reconcile. Whether MCP runs at all is the
+  // profile row's switch: disabling `extra-mcp` in the 「插件」 page disposes the
+  // fiber, `disposeAll` below releases every composed instance, and each server
+  // keeps its own `enabled` flag for switching one server off inside the list.
+  const documentOf = () => config.servers.get()
   const { reconcile, disposeAll } = instancesOf(ctx, documentOf)
 
   reconcile()
   ctx.effect(() => () => disposeAll())
   ctx.on('loader/volatile-update', (paths) => {
     if (!Array.isArray(paths)) return
-    if (!paths.some((path) => path[0] === 'enabled' || path[0] === 'servers')) return
+    if (!paths.some((path) => path[0] === 'servers')) return
     reconcile()
   })
 }

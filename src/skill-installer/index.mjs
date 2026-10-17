@@ -19,10 +19,11 @@
 // `defaultRef` and `defaultMethod` are `.volatile()` and read per call, so a
 // change applies to the next installation without restarting the Host.
 //
-// `enabled` gates registration itself rather than the tool body: disabling takes
-// the tool out of the model's tool list, and re-enabling puts it back. A tool
-// that stayed listed but always failed would advertise a capability that is not
-// there, which is worse than not offering it.
+// The feature's on/off switch is the profile row's own: disabling
+// `extra-skill-installer` in the 「插件」 page disposes the fiber, and the tool
+// registration goes with it, which takes `skill-install` out of the model's tool
+// list. A tool that stayed listed but always failed would advertise a capability
+// that is not there, which is worse than not offering it.
 
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -33,9 +34,6 @@ export const name = 'extra-skill-installer'
 export const inject = ['tools']
 
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true)
-    .description('Offer the skill-install tool to the model')
-    .volatile(),
   defaultRef: Schema.string().default('main')
     .description('Git ref used when the tool call omits `ref`')
     .volatile(),
@@ -45,8 +43,8 @@ export const Config = Schema.object({
 })
 
 export function apply(ctx, config) {
-  // Built once, so a disable/enable cycle re-registers the same definition
-  // instead of allocating a fresh closure over the config each time.
+  // One definition per fiber: the row's switch decides whether a fiber exists at
+  // all, so there is no registration cycle to rebuild for.
   const tool = defineTool({
     name: 'skill-install',
     description: 'Install a Skill from a GitHub repository or Skill directory URL into the current DSH user skill directory.',
@@ -155,28 +153,6 @@ export function apply(ctx, config) {
     }),
   })
 
-  /** Disposer of the current registration, when the tool is offered at all. */
-  let disposeRegistered
-
-  /**
-   * Bring the tool registry in line with the switch. Re-registration is safe by
-   * construction: the previous registration is always withdrawn first.
-   */
-  const sync = () => {
-    disposeRegistered?.()
-    disposeRegistered = undefined
-    if (!config.enabled.get()) return
-    disposeRegistered = ctx.tools.register(tool)
-  }
-
-  sync()
-  ctx.effect(() => () => {
-    disposeRegistered?.()
-    disposeRegistered = undefined
-  })
-  ctx.on('loader/volatile-update', (paths) => {
-    if (!Array.isArray(paths)) return
-    if (!paths.some((path) => path[0] === 'enabled')) return
-    sync()
-  })
+  // Dies with the fiber — that disposal is exactly what the row's switch does.
+  ctx.tools.register(tool)
 }

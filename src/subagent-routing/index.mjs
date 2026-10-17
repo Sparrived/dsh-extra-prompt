@@ -5,9 +5,13 @@
 // prompt and projects it onto provider catalogs that support
 // `models[].description`. The allow-list (which routes are selectable at all) is
 // still enforced by the official `subagent-model-selection-settings` row and is
-// written by the provider settings surface; this plugin never writes policy. What
-// it does own is a single `enabled` switch: off publishes no routing section and
-// no catalog notes, and withdraws the notes it previously wrote.
+// written by the provider settings surface; this plugin never writes policy.
+//
+// The feature's on/off switch is the profile row's own: disabling
+// `extra-subagent-routing` in the 「插件」 page disposes the fiber, which takes the
+// routing section with it. The catalog notes this plugin wrote are not part of
+// the fiber, so the disposer takes them back explicitly — otherwise
+// `list_subagent_models` would keep advertising a note for a feature that is off.
 //
 // The settings namespace is the profile entry id (equal to the exported `name`),
 // and the form is derived from the exported `Config` schema: only fields marked
@@ -36,9 +40,6 @@ export const inject = ['settings', 'systemPrompt']
 
 /** Live-editable route notes; each field commits independently. */
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true)
-    .description('Publish the routing guidance and the per-model catalog notes')
-    .volatile(),
   routes: Schema.array(Schema.object({
     provider: Schema.string().required().description('Provider id, e.g. deepseek-official'),
     model: Schema.string().required().description('Model id as advertised by list_subagent_models'),
@@ -48,24 +49,29 @@ export const Config = Schema.object({
 })
 
 export function apply(ctx, config) {
-  const enabled = () => config.enabled.get() === true
-
   ctx.systemPrompt.section({
     name: SECTION_NAME,
     order: SECTION_ORDER,
-    text: () => (enabled() ? renderGuidance(config.routes.get(), config.guidance.get()) : ''),
+    text: () => renderGuidance(config.routes.get(), config.guidance.get()),
+  })
+
+  /** A failed projection must not fail the settings commit that triggered it. */
+  const project = (enabled) => projectModelNotes(ctx, config.routes.get(), enabled).catch((error) => {
+    ctx.logger?.warn?.(`subagent routing: model description projection failed: ${error?.message ?? error}`)
   })
 
   ctx.on('loader/volatile-update', (paths) => {
-    // A pure guidance-text change does not reach the catalog; a route edit does,
-    // and so does toggling the switch, because disabling must take back the notes
-    // this plugin wrote rather than leave a stale hint in the catalog.
+    // A pure guidance-text change does not reach the catalog; a route edit does.
     if (!Array.isArray(paths)) return
-    if (!paths.some((path) => path[0] === 'routes' || path[0] === 'enabled')) return
-    // A failed projection must not fail the settings commit that triggered it.
-    return projectModelNotes(ctx, config.routes.get(), enabled()).catch((error) => {
-      ctx.logger?.warn?.(`subagent routing: model description projection failed: ${error?.message ?? error}`)
-    })
+    if (!paths.some((path) => path[0] === 'routes')) return
+    return project(true)
+  })
+
+  // Disposal is what switching the row off does, so it is also where the notes
+  // have to come back: the section is gone with the fiber, and a stale note would
+  // otherwise outlive the feature in every provider catalog that carries one.
+  ctx.effect(() => () => {
+    void project(false)
   })
 }
 
@@ -81,7 +87,8 @@ export function apply(ctx, config) {
  *
  * @param ctx - plugin context.
  * @param routes - this plugin's current `routes` value.
- * @param enabled - whether routing is switched on; off takes the notes back.
+ * @param enabled - whether the notes belong in the catalog; the caller passes
+ *   `false` from its disposer, which is what switching the row off runs.
  */
 async function projectModelNotes(ctx, routes, enabled) {
   const grouped = notesByProvider(routes)
