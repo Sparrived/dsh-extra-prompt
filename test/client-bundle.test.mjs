@@ -42,17 +42,11 @@ const BASELINE = ['react', '@deepseek-ai/dsh-client-ui-primitives']
  */
 const HOST_ICON_NAMES = [
   'IconApiOutlineRegular',
-  'IconArchiveOffOutlineRegular',
   'IconBranchOutlineRegular',
-  'IconCheckCircleOutlineRegular',
   'IconChevronDownOutlineRegular',
   'IconChevronRightOutlineRegular',
-  'IconClockOutlineRegular',
   'IconCompactOutlineRegular',
   'IconContextInjectionOutlineRegular',
-  'IconFlatListOutlineRegular',
-  'IconFolderOpenOutlineRegular',
-  'IconRefreshOutlineRegular',
   'IconSkillOutlineRegular',
   'IconSlidersTwoOutlineRegular',
 ]
@@ -651,30 +645,6 @@ function renderPage(registered, at) {
 const settle = () => new Promise((resolve) => { setImmediate(resolve) })
 
 /**
- * Render the conversation dashboard tab and return its tree.
- *
- * The same commit loop as `renderPage`, for the package's other slot: the
- * dashboard's fetch effect has to run and its `setState` has to land before a
- * later render carries the data.
- */
-function renderConversationDashboard(registered, props) {
-  const entry = registered.find(item => item.slotOptions.name === 'conversation.view' && item.slotOptions.id === 'dashboard')
-  assert.ok(entry, 'the package must register the conversation dashboard tab')
-  let tree = null
-  for (let pass = 0; pass < 8; pass++) {
-    pendingEffects = []
-    stateDirty = false
-    tree = render(entry.component(props), '0')
-    const scheduled = pendingEffects
-    pendingEffects = []
-    if (scheduled.length === 0) break
-    for (const task of scheduled) task()
-    if (!stateDirty) break
-  }
-  return tree
-}
-
-/**
  * Strip the `vm` realm's prototypes so values built inside the sandbox compare
  * equal to plain literals — `deepStrictEqual` otherwise rejects them as
  * "same structure but not reference-equal".
@@ -718,11 +688,11 @@ test('labels the page with the package name and version, and names where the swi
   assert.ok(textOf(intro).includes('「插件」页'))
 })
 
-test('waits for the settings.section and conversation.view declarations instead of racing them', async () => {
+test('waits for the settings.section declaration instead of racing it', async () => {
   const { awaited, registered } = await boot({}, {}, { declare: false })
   // A bare `slots.register` into an undeclared slot throws; `slots.inject` is the
   // only correct way to contribute to a slot another package declares.
-  assert.deepEqual(awaited.map(entry => entry.name), ['settings.section', 'conversation.view'])
+  assert.deepEqual(awaited.map(entry => entry.name), ['settings.section'])
   assert.equal(registered.length, 0, 'nothing may register before the declaration arrives')
   awaited[0].callback()
   assert.equal(registered.length, 1)
@@ -731,14 +701,6 @@ test('waits for the settings.section and conversation.view declarations instead 
     id: 'extra-prompt',
     order: 30,
     label: '提示词与技能',
-  })
-  awaited[1].callback()
-  assert.equal(registered.length, 2)
-  assert.deepEqual(plain(registered[1].slotOptions), {
-    name: 'conversation.view',
-    id: 'dashboard',
-    order: 20,
-    label: '看板',
   })
 })
 
@@ -800,22 +762,16 @@ test('names only host icons from the pinned set, and actually draws them', async
 })
 
 test('renders no picture glyphs, in its source or on the page', async () => {
-  // The artifact and the Host-side model that feeds it: neither may carry a
-  // symbol standing in for art. The model is here because it used to prefix its
-  // own badges with one.
-  for (const url of [BUNDLE, new URL('../src/session-dashboard/model.mjs', import.meta.url)]) {
-    const source = await readFile(url, 'utf8')
-    // A narrow allow-list of the punctuation the copy legitimately uses is not
-    // needed: nothing in either file is meant to be outside ASCII, CJK, and the
-    // handful of typographic marks the ranges above exclude.
-    const found = [...new Set(source.match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [])]
-    assert.deepEqual(found, [], `${url.pathname} must draw no picture glyph`)
-  }
+  // The artifact may not carry a symbol standing in for art. A narrow allow-list
+  // of the punctuation the copy legitimately uses is not needed: nothing in the
+  // file is meant to be outside ASCII, CJK, and the handful of typographic marks
+  // the ranges above exclude.
+  const source = await readFile(BUNDLE, 'utf8')
+  const found = [...new Set(source.match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [])]
+  assert.deepEqual(found, [], `${BUNDLE.pathname} must draw no picture glyph`)
 
   const { registered } = await boot()
-  // Every group's cards, then the dashboard with data that reaches each spot that
-  // used to hold a glyph (meta tags, refresh control, synergy tiles, the
-  // no-rework notice, and one lifecycle event of every kind).
+  // Every group's cards, and the Skill card that is not a namespace.
   for (const ns of Object.keys(CARD_ICON_OF)) {
     assert.deepEqual(textOf(renderPage(registered, ns)).match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [])
   }
@@ -824,134 +780,6 @@ test('renders no picture glyphs, in its source or on the page', async () => {
     [],
     'the Skill manager card is not a namespace and must be checked too',
   )
-
-  apiAnswers.set('dashboard/data', {
-    ok: true,
-    value: {
-      session: { id: 'sess-glyphs', title: '图标回归', cwd: 'D:/Code/icons' },
-      summary: {
-        eventCount: 3, messages: 2, userMessages: 1, assistantMessages: 1, turns: 2, steps: 2,
-        toolCalls: 1, toolResults: 1, toolFailures: 0,
-        firstEventTime: 1710000000000, lastEventTime: 1710000060000, elapsedMs: 60000,
-      },
-      stats: { llmMs: 40000, toolMs: 10000, ttftMs: 900, decodeMs: 38000, decodeTokens: 1500 },
-      token: {
-        totals: {
-          inputTokens: 4000, outputTokens: 1500, reasoningTokens: 600, totalTokens: 5500,
-          uncachedInputTokens: 1000, cacheReadTokens: 3000, cacheWriteTokens: 0, cacheHitRate: 75,
-        },
-        points: [],
-      },
-      // No repeated commands, so the notice that used to end in U+2713 renders.
-      cost: {
-        toolCalls: 1, toolFailures: 0, toolErrorRate: 0, retries: 0, retriedSteps: 0,
-        wastedTurns: 0, wastedSteps: 0, wastedToolCalls: 0, distinctCommands: 3,
-        repeatedCommands: [], repeatedCommandCalls: 0, repeatedCommandRate: 0,
-        tools: [], turns: [],
-      },
-      turns: [],
-      context: {
-        events: [
-          { seq: 1, turn: 1, step: 1, kind: 'inject', badge: '注入', title: '额外提示词规则注入', details: '注入提示词', deltaTokens: 120 },
-          { seq: 2, turn: 1, step: 1, kind: 'prune', badge: '剪枝', title: '工具 [read] 输出剪枝', details: '截断超长返回', deltaTokens: -800 },
-          { seq: 3, turn: 2, step: 1, kind: 'compact', badge: '压缩', title: '第 2 轮 上下文自动压缩', details: '释放了 1.2k Tokens', deltaTokens: -1200 },
-        ],
-      },
-    },
-  })
-  renderConversationDashboard(registered, { sessionId: 'sess-glyphs' })
-  await settle()
-  await settle()
-  const dashboard = renderConversationDashboard(registered, { sessionId: 'sess-glyphs' })
-  assert.deepEqual(textOf(dashboard).match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [])
-
-  // ...and the glyphs came back as icons: the meta tags, the refresh control, the
-  // four synergy tiles, the no-rework notice, and the three lifecycle kinds.
-  const drawn = iconsOf(dashboard)
-  assert.ok(drawn.includes('IconFolderOpenOutlineRegular'), 'the cwd tag draws a folder')
-  assert.ok(drawn.includes('IconFlatListOutlineRegular'), 'the event-count tag draws a list')
-  assert.ok(drawn.includes('IconClockOutlineRegular'), 'the duration tag draws a clock')
-  assert.ok(drawn.includes('IconRefreshOutlineRegular'), 'the refresh control draws a refresh icon')
-  assert.ok(drawn.includes('IconCheckCircleOutlineRegular'), 'the no-rework notice draws a check')
-  assert.ok(drawn.includes('IconCompactOutlineRegular'), 'rtk tiles and compact events draw the compact icon')
-  assert.ok(drawn.includes('IconApiOutlineRegular'), 'the MCP tile draws the MCP icon')
-  assert.ok(drawn.includes('IconContextInjectionOutlineRegular'), 'the prompt tile draws the injection icon')
-  assert.ok(drawn.includes('IconSkillOutlineRegular'), 'the skills tile draws the skill icon')
-  assert.ok(drawn.includes('IconArchiveOffOutlineRegular'), 'a prune event draws the prune icon')
-
-  // Sizes follow the host's own usage: 12px for inline meta and control glyphs
-  // (its `IconClockOutlineRegular size={12}`, `IconRefreshOutlineRegular size={12}`,
-  // `IconCheckOutlineRegular size={12}`), and 10px inside the event badges, which
-  // are the tightest spot on the page — the host's own smallest chip glyphs are
-  // `IconCloseOutlineRegular size={10}`.
-  const firstWith = (name) => findAll(dashboard, node => node.type === 'svg' && node.props['data-icon'] === name)[0]
-  assert.equal(firstWith('IconFolderOpenOutlineRegular').props.width, 12)
-  assert.equal(firstWith('IconFlatListOutlineRegular').props.width, 12)
-  assert.equal(firstWith('IconClockOutlineRegular').props.width, 12)
-  assert.equal(firstWith('IconRefreshOutlineRegular').props.width, 12)
-  assert.equal(firstWith('IconCheckCircleOutlineRegular').props.width, 12)
-
-  const pruneBadge = findAll(dashboard, node => typeof node.props.className === 'string'
-    && node.props.className.includes('dsh-dash-event-badge')
-    && node.props.className.includes('dsh-badge-prune'))[0]
-  assert.ok(pruneBadge, 'the prune event row must render')
-  const pruneBadgeIcon = findAll(pruneBadge, node => node.type === 'svg')[0]
-  assert.equal(pruneBadgeIcon.props['data-icon'], 'IconArchiveOffOutlineRegular')
-  assert.equal(pruneBadgeIcon.props.width, 10)
-
-  // The badge keeps its own word for what happened, so the model stays readable
-  // without the glyph it no longer ships.
-  assert.ok(textOf(dashboard).includes('剪枝'))
-  assert.ok(textOf(dashboard).includes('压缩'))
-})
-
-test('drops a picture glyph that arrives inside an event badge over the wire', async () => {
-  // The event badge is the one piece of this page's text that comes from the wire,
-  // and the row already draws an icon for `kind` beside it. So a producer still
-  // sending the old `'<scissors> 压缩'` would put a font glyph *and* an icon on one
-  // row — exactly the double-drawing this page no longer does. The renderer is the
-  // last place that can refuse it, so it refuses it here. Built from codepoints so
-  // this file stays free of the glyphs it is defending against.
-  const SCISSORS = String.fromCodePoint(0x2702)
-  const SYRINGE = String.fromCodePoint(0x1F489)
-
-  const { registered } = await boot()
-  apiAnswers.set('dashboard/data', {
-    ok: true,
-    value: {
-      session: { id: 'sess-stale-badge', title: '旧徽章' },
-      summary: { eventCount: 3, turns: 2, steps: 2, elapsedMs: 60000 },
-      stats: {},
-      token: { totals: { inputTokens: 4000, outputTokens: 1500, totalTokens: 5500 }, points: [] },
-      cost: {
-        toolCalls: 1, toolFailures: 0, distinctCommands: 0, repeatedCommands: [],
-        repeatedCommandCalls: 0, repeatedCommandRate: 0, tools: [], turns: [],
-      },
-      turns: [],
-      context: {
-        events: [
-          { seq: 1, turn: 1, step: 1, kind: 'compact', badge: SCISSORS + ' 压缩', title: '压缩', details: '释放了 1.2k Tokens', deltaTokens: -1200 },
-          { seq: 2, turn: 1, step: 1, kind: 'prune', badge: SCISSORS + ' 剪枝', title: '剪枝', details: '截断超长返回', deltaTokens: -800 },
-          { seq: 3, turn: 2, step: 1, kind: 'inject', badge: SYRINGE + ' 注入', title: '注入', details: '注入提示词', deltaTokens: 120 },
-        ],
-      },
-    },
-  })
-  renderConversationDashboard(registered, { sessionId: 'sess-stale-badge' })
-  await settle()
-  await settle()
-  const dashboard = renderConversationDashboard(registered, { sessionId: 'sess-stale-badge' })
-
-  const text = textOf(dashboard)
-  assert.deepEqual(text.match(new RegExp(PICTURE_GLYPH, 'gu')) ?? [], [],
-    'a stale badge glyph must never reach the page')
-  // The label survives the strip, so the row still says what happened...
-  for (const label of ['压缩', '剪枝', '注入']) assert.ok(text.includes(label), `the "${label}" badge keeps its label`)
-  // ...and the icon is still the one that carries the meaning.
-  const drawn = iconsOf(dashboard)
-  assert.ok(drawn.includes('IconCompactOutlineRegular'))
-  assert.ok(drawn.includes('IconArchiveOffOutlineRegular'))
-  assert.ok(drawn.includes('IconContextInjectionOutlineRegular'))
 })
 
 test('degrades one missing host icon to a neutral outline instead of failing the page', async () => {
@@ -1010,8 +838,7 @@ test('renders every declared field for every namespace', async () => {
   const page = renderPage(registered)
   assert.equal(findAll(page, node => node.props['data-namespace'] === 'enable').length, 0)
 
-  // Five groups: prompt / routing / skill (two namespaces) / rtk / mcp. The
-  // statistics dashboard has no settings group: it lives in the conversation view.
+  // Five groups: prompt / routing / skill (two namespaces) / rtk / mcp.
   assert.deepEqual(tabsOf(page).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
   assert.deepEqual(tabsOf(page).map(node => textOf(node)), ['提示词', '子代理路由', '技能', '输出压缩', 'MCP'])
 
@@ -1216,9 +1043,6 @@ test('groups the cards behind a tablist and follows the selection', async () => 
   const { registered } = await boot()
   const page = renderPage(registered)
   const tabs = tabsOf(page)
-  // The statistics dashboard has no settings group: it is the conversation tab
-  // now, so nothing on this page may offer it.
-  assert.ok(!textOf(page).includes('统计看板'))
   // The selected tab names the panel it controls, and the panel names it back.
   assert.deepEqual(tabs.map(node => node.props['aria-selected']), [true, false, false, false, false])
   const panel = findAll(page, node => node.props.role === 'tabpanel')[0]
@@ -1431,240 +1255,6 @@ test('the Skill card reports a refused removal instead of hiding it', async () =
   assert.ok(textOf(card).includes('已拒绝删除'))
   assert.equal(findAll(card, node => node.type === 'button').length, 1)
   assert.ok(textOf(card).includes('taste-skill'))
-})
-
-test('the in-session dashboard renders charts, metrics, and handles range switching', async () => {
-  const { registered } = await boot()
-
-  // The dashboard is a conversation tab now: the session comes from the tab, so
-  // the only operation it may ask the Host for is that session's data.
-  apiAnswers.set('dashboard/data', {
-    ok: true,
-    value: {
-      session: { id: 'sess-1', title: '重构看板前端', cwd: 'D:/Code/test' },
-      summary: {
-        eventCount: 28,
-        messages: 8,
-        userMessages: 4,
-        assistantMessages: 4,
-        turns: 4,
-        steps: 6,
-        toolCalls: 5,
-        toolResults: 5,
-        toolFailures: 1,
-        firstEventTime: 1710000000000,
-        lastEventTime: 1710000120000,
-        elapsedMs: 120000,
-      },
-      stats: {
-        llmMs: 70000,
-        toolMs: 30000,
-        ttftMs: 1200,
-        decodeMs: 65000,
-        decodeTokens: 2600,
-      },
-      token: {
-        totals: {
-          inputTokens: 8500,
-          outputTokens: 2600,
-          reasoningTokens: 1200,
-          totalTokens: 11100,
-          uncachedInputTokens: 2500,
-          cacheReadTokens: 6000,
-          cacheWriteTokens: 0,
-          cacheHitRate: 70.58,
-        },
-        points: [
-          { key: '1', label: '第 1 轮 · 步 1', inputTokens: 2000, outputTokens: 600, totalTokens: 2600, runMs: 15000 },
-          { key: '2', label: '第 2 轮 · 步 1', inputTokens: 6500, outputTokens: 2000, totalTokens: 8500, runMs: 25000 },
-        ],
-      },
-      cost: {
-        toolCalls: 5,
-        toolFailures: 1,
-        toolErrorRate: 20,
-        retries: 1,
-        retriedSteps: 1,
-        wastedTurns: 1,
-        wastedSteps: 2,
-        wastedToolCalls: 1,
-        distinctCommands: 2,
-        repeatedCommands: [{ command: 'git status', calls: 2 }],
-        repeatedCommandCalls: 2,
-        repeatedCommandRate: 50,
-        tools: [
-          { name: 'pwsh', calls: 3, errors: 1, errorRate: 33.3, durationMs: 18000, resultChars: 4500 },
-          { name: 'read', calls: 2, errors: 0, errorRate: 0, durationMs: 2000, resultChars: 12000 },
-        ],
-        turns: [
-          { key: 't1', turn: 1, steps: 2, toolCalls: 2, toolFailures: 0, outcome: 'completed' },
-          { key: 't2', turn: 2, steps: 2, toolCalls: 2, toolFailures: 1, outcome: 'error' },
-        ],
-      },
-      turns: [
-        { key: 't1', turn: 1, label: '第 1 轮', durationMs: 45000, steps: 2, toolCalls: 2, totalTokens: 2600, signals: ['user', 'tool', 'assistant'] },
-        { key: 't2', turn: 2, label: '第 2 轮', durationMs: 75000, steps: 2, toolCalls: 2, totalTokens: 8500, signals: ['user', 'tool', 'error', 'assistant'] },
-      ],
-    },
-  })
-
-  // The tab hands over its own session, so the view loads that one directly.
-  renderConversationDashboard(registered, { sessionId: 'sess-1' })
-  await settle()
-  await settle()
-  const page = renderConversationDashboard(registered, { sessionId: 'sess-1' })
-  const content = textOf(page)
-
-  // The only thing it asks the Host for is that session: the cross-session list
-  // that fed the old settings group is gone along with the group.
-  assert.deepEqual(apiRequests.map(call => call.body.op), ['dashboard/data'])
-  assert.deepEqual(plain(apiRequests[0].body), { op: 'dashboard/data', sessionId: 'sess-1' })
-
-  // Verify elements are rendered
-  assert.ok(content.includes('重构看板前端'))
-  assert.ok(content.includes('上下文窗口容量与多层级解剖'))
-  assert.ok(content.includes('Extra-Prompt 协同效益与开销'))
-  assert.ok(content.includes('上下文生命周期事件流'))
-  assert.ok(content.includes('会话耗时'))
-  assert.ok(content.includes('对话轮次 / 步数'))
-  assert.ok(content.includes('Token 消耗总量'))
-  assert.ok(content.includes('KV 缓存命中率'))
-  assert.ok(content.includes('Token 构成与缓存分布'))
-  assert.ok(content.includes('耗时归因与推理速度'))
-  assert.ok(content.includes('轮次健康度与损耗归因'))
-  assert.ok(content.includes('工具性能与数据载荷开销'))
-  assert.ok(content.includes('重复命令重做检测'))
-
-  // Verify charts and SVG elements
-  const donutSvg = findAll(page, node => node.type === 'svg' && node.props['aria-label'] === 'Token 构成比例图')[0]
-  assert.ok(donutSvg, 'must render SVG donut chart')
-  const gaugeSvg = findAll(page, node => node.type === 'svg' && node.props['aria-label'] === '上下文窗口水位图')[0]
-  assert.ok(gaugeSvg, 'must render SVG context window gauge')
-
-  // Verify tool table has pwsh and read
-  assert.ok(content.includes('pwsh'))
-  assert.ok(content.includes('read'))
-
-  // Verify repeated command is listed
-  assert.ok(content.includes('git status'))
-
-  // Switch range to 'recent'
-  const recentBtn = findAll(page, node => node.type === 'button' && textOf(node).includes('最近 8 轮'))[0]
-  assert.ok(recentBtn, 'must have range button for recent turns')
-  recentBtn.props.onClick()
-  const pageRecent = renderConversationDashboard(registered, { sessionId: 'sess-1' })
-  assert.ok(pageRecent, 'renders after range switch')
-})
-
-test('registers conversation.view slot for in-session dashboard tab', async () => {
-  const { registered } = await boot()
-  const convEntry = registered.find(item => item.slotOptions.name === 'conversation.view' && item.slotOptions.id === 'dashboard')
-  assert.ok(convEntry, 'must register conversation.view with id "dashboard"')
-  assert.equal(convEntry.slotOptions.order, 20)
-  assert.equal(convEntry.slotOptions.label, '看板')
-  assert.deepEqual(plain(convEntry.slotOptions.inject('sess-test')), { sessionId: 'sess-test' })
-
-  // Render ConversationSessionDashboardView
-  const component = convEntry.component
-  const rendered = render(component({ sessionId: 'sess-test' }), '0')
-  assert.ok(rendered)
-  assert.ok(rendered.props.className.includes('dsh-dash-session-view'))
-  assert.equal(rendered.props['data-conversation-composer-overlay'], '')
-})
-
-test('conversation dashboard detects active model from DOM composer and rejects header team labels', async () => {
-  // The header's own label, as the host writes it (`ui-agent-preset`'s zh
-  // dictionary: `trigger: '智能体团队'`). It is the exact string the detector has
-  // to refuse, so a fixture of our own invention would test nothing.
-  const TEAM_LABEL = '智能体团队'
-  const headerMenuBtn = {
-    tagName: 'BUTTON',
-    className: 'header-mode-trigger',
-    title: TEAM_LABEL,
-    attributes: { 'aria-haspopup': 'menu', title: TEAM_LABEL },
-    textContent: TEAM_LABEL,
-    children: [],
-  }
-
-  const triggerLabelSpan = {
-    tagName: 'SPAN',
-    className: 'wq12jW_triggerLabel',
-    attributes: { class: 'wq12jW_triggerLabel' },
-    textContent: 'gemini-3.8-flash-high',
-    children: [],
-  }
-
-  const composer = {
-    tagName: 'DIV',
-    className: 'standardControls composer',
-    attributes: { class: 'standardControls composer' },
-    textContent: 'gemini-3.8-flash-high',
-    children: [triggerLabelSpan],
-    querySelector: (sel) => (sel.includes('triggerLabel') ? triggerLabelSpan : null),
-    querySelectorAll: (sel) => (sel.includes('span') ? [triggerLabelSpan] : []),
-  }
-
-  const dom = {
-    querySelector: (sel) => {
-      if (sel.includes('composer') || sel.includes('standardControls') || sel.includes('InputBar') || sel.includes('footer')) {
-        return composer
-      }
-      return null
-    },
-    querySelectorAll: (sel) => {
-      if (sel.includes('aria-haspopup="menu"')) return [headerMenuBtn]
-      return []
-    },
-  }
-
-  const { registered, plugin } = await boot(undefined, undefined, undefined, { dom })
-
-  // 1. Assert isLikelyModelName rejects the header's own labels, but accepts 'gemini-3.8-flash-high'
-  assert.equal(plugin.isLikelyModelName(TEAM_LABEL), false)
-  assert.equal(plugin.isLikelyModelName('标准模式'), false)
-  assert.equal(plugin.isLikelyModelName('当前模型'), false)
-  assert.equal(plugin.isLikelyModelName('gemini-3.8-flash-high'), true)
-
-  apiAnswers.set('dashboard/data', {
-    ok: true,
-    value: {
-      session: { id: 'sess-dom-test', title: 'DOM 回退会话' },
-      summary: { turns: 1, steps: 1, elapsedMs: 10000 },
-      stats: {},
-      context: { capacity: {} },
-      token: {
-        totals: { inputTokens: 5000, outputTokens: 1000, totalTokens: 6000 },
-        points: [{ key: '1', label: '第 1 轮', inputTokens: 5000, outputTokens: 1000, totalTokens: 6000 }],
-      },
-      cost: { toolCalls: 0, tools: [] },
-      turns: [{ key: 't1', turn: 1, label: '第 1 轮', durationMs: 10000, steps: 1, toolCalls: 0, totalTokens: 6000, signals: ['user', 'assistant'] }],
-    },
-  })
-
-  // 2. Call WITHOUT passing sessionModel so it exercises DOM fallback
-  const simulatedSession = { sessionId: 'sess-dom-test', title: 'DOM 回退会话' }
-  renderConversationDashboard(registered, {
-    sessionId: 'sess-dom-test',
-    useSession: (selector) => selector(simulatedSession),
-  })
-  await settle()
-  await settle()
-  const page = renderConversationDashboard(registered, {
-    sessionId: 'sess-dom-test',
-    useSession: (selector) => selector(simulatedSession),
-  })
-  const content = textOf(page)
-
-  // 3. Assert user sees 'gemini-3.8-flash-high · 1.00M 上限'
-  assert.ok(
-    content.includes('gemini-3.8-flash-high · 1.00M 上限'),
-    `User must see "gemini-3.8-flash-high · 1.00M 上限". Got:\n${content.slice(0, 300)}`
-  )
-
-  // 4. Assert it NEVER shows '智能体团队 · 131.1k 上限'
-  assert.ok(!content.includes('智能体团队 · 131.1k 上限'))
-  assert.ok(!content.includes('智能体团队'))
-  assert.ok(!content.includes('131.1k 上限'))
 })
 
 test('marks a field the user layer overrides, and the reset stages a clear', async () => {

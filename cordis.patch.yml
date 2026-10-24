@@ -19,9 +19,8 @@
 # The first row is mounted from the BARE package name on purpose: `client-modules`
 # attaches a package's browser half to the row whose specifier is the bare package
 # name, and a row mounted from a subpath export never carries a half. That half owns
-# both the settings page and the in-session dashboard, so switching THIS row off
-# removes the page and the dashboard tab with it, and the other rows' settings
-# become uneditable until it is switched back on.
+# the settings page, so switching THIS row off removes the page with it, and the
+# other rows' settings become uneditable until it is switched back on.
 #
 # The five host-only rows after it are split from each other because their Cordis
 # `inject` sets differ — one plugin could not serve all five:

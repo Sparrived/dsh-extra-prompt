@@ -37,7 +37,6 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveDshHome, resolveDshProfileDir } from '../shared/dsh-home.mjs';
 import { listManagedSkills, uninstallManagedSkill } from '../skill-installer/manage.mjs';
-import { readSessionDashboardFromHost } from '../session-dashboard/model.mjs';
 import { assembleSkillCatalog } from './catalog.mjs';
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -355,14 +354,6 @@ function operationsOf(ctx) {
         return { ok: true, value: { removed } };
       } catch (error) {
         return failure('extra-prompt/skill-not-removed', error instanceof Error ? error.message : String(error));
-      }
-    },
-    'dashboard/data': async (body) => {
-      try {
-        const data = await readSessionDashboardFromHost(ctx, body?.sessionId);
-        return { ok: true, value: data };
-      } catch (error) {
-        return failure('extra-prompt/dashboard-data-failed', error instanceof Error ? error.message : String(error));
       }
     },
   };

@@ -9,7 +9,6 @@
 | Skill 安装 | 提供 `skill-install` 工具，从 git 或压缩包安装 Skill 到当前 profile | `extra-skill-installer` |
 | rtk 输出压缩 | 对 `git status` / `git diff` / `git log` / `rg` / `grep` 的输出做压缩 | `extra-rtk-compact` |
 | MCP 服务器 | 每台服务器组合一个官方 `dsh-mcp-client` 实例，它的工具以 `mcp__<服务器名>__<工具名>` 交给模型 | `extra-mcp` |
-| 会话看板 | 迁移自 Deeptop 的高密度多维看板：会话内标签页里的 Token 环形图、时序脉冲、耗时追踪与命令重做归因 | `extra-prompt`（与设置页同一个浏览器半边） |
 
 设置页另有一张不属于任何配置命名空间的卡片：**模型可见的 Skills**。它列出模型当前真正能读取到的 Skill（工作区与用户级目录、自定义与内置目录、插件运行期 Skill），并允许卸载本包装过的那些（数据来自一个 `/api` 路由，见下）。
 
@@ -21,7 +20,7 @@ DSH 用「profile 里的一行插件的 `id`」同时作为它的设置命名空
 
 | profile 行 id | 挂载的包内路径 | Cordis `inject` | 设置页卡片 | 行显示元数据 |
 | --- | --- | --- | --- | --- |
-| `extra-prompt` | `dsh-extra-prompt`（裸包名） | 无 | 无（承载浏览器半边：设置页 + 看板） | 根 `package.json` + `locale/{en,zh}.json` |
+| `extra-prompt` | `dsh-extra-prompt`（裸包名） | 无 | 无（承载浏览器半边：设置页） | 根 `package.json` + `locale/{en,zh}.json` |
 | `extra-prompt-injection` | `dsh-extra-prompt/prompt-injection` | 无 | 全局提示词注入 | `src/prompt-injection/` |
 | `extra-subagent-routing` | `dsh-extra-prompt/subagent-routing` | `settings`、`systemPrompt` | 子代理路由 | `src/subagent-routing/` |
 | `extra-skill-installer` | `dsh-extra-prompt/skill-installer` | `tools` | Skill 安装 | `src/skill-installer/` |
@@ -40,7 +39,7 @@ DSH 用「profile 里的一行插件的 `id`」同时作为它的设置命名空
 
 没有任何一行的 `Config` 里还有 `enabled` 字段。「插件」页上那一行的开关就是这个功能的开关：关掉时**插件管理页会把 `disabled: true` 写进 profile patch**（`~/.dsh/profiles/<profile>/cordis.patch.yml`），加载器随即将该行的 fiber 卸载，它注册的工具、注入的内容、system prompt 段落、以及写进模型目录的说明一起消失——是真门控，不是显示开关。这条路径不在本包里：`@deepseek-ai/dsh-client-ui-plugin-manager` 的 `setPluginEnabled` 按 profile patch 里的行 id 写 `disabled` 覆盖（它的 README「Switching one row of a bundle」一节），本包要做的只是让每一行都能被这样寻址。这也意味着：
 
-- 关掉 `extra-prompt`（裸包名那一行）会**同时**下掉设置页和会话看板：浏览器半边挂在这一行上。其余几行的配置在那期间不可编辑（宿主不会为一个没挂载的行提供设置表单），重新打开该行即恢复，写下的值一个都不丢。
+- 关掉 `extra-prompt`（裸包名那一行）会**同时**下掉设置页：浏览器半边挂在这一行上。其余几行的配置在那期间不可编辑（宿主不会为一个没挂载的行提供设置表单），重新打开该行即恢复，写下的值一个都不丢。
 - 已经注入过的提示词是会话历史，关掉之后不会被改写——同一会话里清空文本框仍会追加一条「不再适用」的说明，那是配置层面的清空路径。
 - 「设置 → 提示词与技能」页里每一张卡片都会照常显示；没挂载的行显示为「这一行没有挂载」，并提示到「插件」页把它打开。
 
@@ -99,16 +98,15 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 | 功能分组的标签栏 | `SegmentedControl`（`role="tablist"`，页面持有选中项并把面板的 `id`/`aria-labelledby` 接回去） |
 | 页面与卡片上的小图标 | `ui-primitives` 自带的 `Icon*OutlineRegular` 组件 |
 
-**图标一律用宿主的图标集，没有一个是本包自己画的，也没有一个 emoji。** 页面上的每个图形——页头、五张功能卡片的标题、看板里的 KPI 标签、协同效益四块、生命周期事件徽章、元信息标签、刷新按钮——都是 `ui-primitives` 导出的 `Icon*OutlineRegular` 组件：16×16 的 `viewBox`、`fill:none`、`stroke:currentColor`、`aria-hidden`，尺寸与描边和官方设置页旁边的图标完全一致。这套图标跟着主题走（颜色靠 `currentColor` 继承），因此不会出现「emoji 在深色主题里是彩色方块、在浅色主题里是另一副样子」这种问题。
+**图标一律用宿主的图标集，没有一个是本包自己画的，也没有一个 emoji。** 页面上的每个图形——页头与五张功能卡片的标题——都是 `ui-primitives` 导出的 `Icon*OutlineRegular` 组件：16×16 的 `viewBox`、`fill:none`、`stroke:currentColor`、`aria-hidden`，尺寸与描边和官方设置页旁边的图标完全一致。这套图标跟着主题走（颜色靠 `currentColor` 继承），因此不会出现「emoji 在深色主题里是彩色方块、在浅色主题里是另一副样子」这种问题。
 
-尺寸也不是拍脑袋定的，而是照宿主自己的用法抄：卡片与页头用 16px，MCP 卡片里「高级设置」那颗 chevron 走 `Button` 的 `icon` 槽并用 13px（宿主自己的 `Button size="sm"` 调用点就是 13px），元信息标签、刷新与高效提示用 12px（宿主自己的 `IconClockOutlineRegular size={12}` / `IconRefreshOutlineRegular size={12}` / `IconCheckOutlineRegular size={12}`），事件徽章这一处最挤，用 10px（宿主最小的 `IconCloseOutlineRegular size={10}`）。这几档都钉在测试里。
+尺寸也不是拍脑袋定的，而是照宿主自己的用法抄：卡片与页头用 16px，MCP 卡片里「高级设置」那颗 chevron 走 `Button` 的 `icon` 槽并用 13px（宿主自己的 `Button size="sm"` 调用点就是 13px）。这两档都钉在测试里。
 
-这些名字集中写在 `lib/client.js` 的 `HOST_ICON_NAMES` 一张表里（按含义索引，如 `injection` / `compact` / `prune`），`iconOf()` 用它对宿主模块取组件。集中成一张表的理由是它是**对宿主的依赖**：宿主换掉一个图标名，页面不会报错，只会安静地画一个中性占位轮廓。因此：
+这些名字集中写在 `lib/client.js` 的 `HOST_ICON_NAMES` 一张表里（按含义索引，如 `injection` / `compact` / `mcp`），`iconOf()` 用它对宿主模块取组件。集中成一张表的理由是它是**对宿主的依赖**：宿主换掉一个图标名，页面不会报错，只会安静地画一个中性占位轮廓。因此：
 
-- `test/client-bundle.test.mjs` 把这份清单**钉死**，加一个图标必须是有意为之，而不是顺手写个名字；清单已对着本包要支持的**两个宿主**核过——`vendor/dsh` 的 0.1.7-rc.2（`packages/client/ui-primitives/src/icons/index.tsx`）与实际安装的 0.2.0-rc.2 产物。两侧不只是「提过这些名字」：0.1.7-rc.2 的索引里这 14 个全在，安装版（`app.asar` 里 `@deepseek-ai/dsh-client-ui-primitives` 的 ESM 产物）里它们是真的 `export {}` 绑定（282 个导出中逐个核对），命名与 `{ size, className }` 契约一致。MCP 卡片用到的 `Button` 的 `icon` 槽也在两侧都核过：0.1.7-rc.2 是 `icon?: ReactNode` 加 `{icon != null && <span className={css.icon}>{icon}</span>}`，安装版是同一段实现——这是本次改动唯一依赖的宿主能力，所以单独确认。
+- `test/client-bundle.test.mjs` 把这份清单**钉死**，加一个图标必须是有意为之，而不是顺手写个名字；清单已对着本包要支持的**两个宿主**核过——`vendor/dsh` 的 0.1.7-rc.2（`packages/client/ui-primitives/src/icons/index.tsx`）与实际安装的 0.2.0-rc.2 产物。两侧不只是「提过这些名字」：0.1.7-rc.2 的索引里这 8 个全在，安装版（`app.asar` 里 `@deepseek-ai/dsh-client-ui-primitives` 的 ESM 产物）里它们是真的 `export {}` 绑定（282 个导出中逐个核对），命名与 `{ size, className }` 契约一致。MCP 卡片用到的 `Button` 的 `icon` 槽也在两侧都核过：0.1.7-rc.2 是 `icon?: ReactNode` 加 `{icon != null && <span className={css.icon}>{icon}</span>}`，安装版是同一段实现——这是本次改动唯一依赖的宿主能力，所以单独确认。
 - 宿主真的没有那个名字时（换了客户端），`iconOf()` 回落到本包画的一个 16×16 中性圆角方框轮廓，而不是把 `undefined` 交给 `React.createElement`——后者会抛 `Element type is invalid`，把整页设置项一起带走。掉一个图标和掉一整页，代价不该是同一个数量级。判定「有没有」用的是「能不能当组件类型」：函数算，带 `$$typeof` 的 `memo`/`forwardRef` 包装对象也算（宿主哪天改成用 `memo` 包图标，不至于被误判成缺失而全部降级），只有真拿不到才回落。
 - 卡片标题仍然是「图标 + 文字」，图形是装饰性的（宿主图标自带 `aria-hidden`），可访问名依旧是标题文字。
-- 页面上唯一从线上来的文案是看板的事件徽章（`context.events[].badge`），而那一行旁边已经画了 `kind` 的图标。模型侧现在只发纯文字标签，但浏览器半边仍然会**丢掉徽章里的字形**（`badgeText()`，用的正是测试里那一个字符类）：真正的前提是「一个意思只画一次」，这一道防线放在渲染处，而不是指望每个生产者都是新版本。
 
 `ui-primitives` 没有多行文本、枚举下拉和列表编辑器这三类原子，因此这三个控件由本包自己渲染。它们的样式规则逐条抄自宿主自己的 `settings-form/fields.module.css` 与 `ConfigField.module.css`，只使用 `--dsw-*` 设计令牌，并在 `apply` 时作为一张 `<style>` 注入一次——这样它们与旁边的官方字段共用同一套间距、边框和主题，而不是又一套自造外观。
 
@@ -132,34 +130,6 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 ### 分组 Tab
 
 卡片多了以后一页滚不完，所以页头下面是宿主的 `SegmentedControl`：提示词 / 子代理路由 / 技能 / 输出压缩 / MCP，每组只渲染当前这一组的卡片或视图。**五个分组始终都在**——页面形状由包决定，不由 profile 决定：某一行关掉了，它的标签页不会消失，只是那一张卡片显示成「没有挂载」，从「插件」页打开后又带着原来的配置回来。选中项因此不会指向一个不存在的分组。
-
-会话看板不在这个标签栏里：它只作为会话内的 `conversation.view` 标签页存在，见下。
-
-### 会话看板（Session Statistics Dashboard）
-
-将 Deeptop 广受好评的会话性能与成本计量看板完全迁移并做了现代高密度重构。底层逻辑由纯函数模型 `src/session-dashboard/model.mjs` 支撑，前端使用纯 React + SVG + CSS 动效打造，信息密度极高且视觉现代精致。入口只有一个：会话内的 **「看板」** 标签页。
-
-- 注册在官方 `conversation.view` 槽位（`order: 20`，位于「对话」与「轨迹」标签页旁边）；
-- 在任何会话中直接点击顶部的 **「看板」** 标签，即可就地查看该会话的性能与成本明细，输入框保持吸底浮层联动；
-- 看的是**当前这一个会话**：会话 id 由槽位注入，切换会话时视图按 id 重挂载，不会把上一个会话的数字留在屏幕上。
-
-- **核心特性**：
-  - **时间窗口切片**：顶部工具栏提供「全部轮次」与「最近 8 轮」的动态切片，以及一键实时刷新数据。
-  - **6 大核心 KPI 指标卡**：
-    - **会话耗时**：端到端墙上时钟持续时长，以及首末事件起止绝对时刻；
-    - **对话轮次 / 步骤**：总轮数与底层 Agent 实际执行的步数比率；
-    - **消息吞吐**：用户发出提示与模型生成回复的条数对比；
-    - **工具调用**：调用总量、执行成功率（百分比）与失败次数；
-    - **Token 消耗总量**：总消耗及输入/输出 Token 拆分；
-    - **KV 缓存命中率**：上下文缓存命中比例（%），以及 cacheRead / cacheWrite 的具体 Token 量。
-  - **动态 SVG 环形图（Token 构成与缓存分布）**：精巧的甜甜圈图表直观展示输入、输出与深度思考推理（Reasoning）的所占弧度与色彩分段，附带平滑动画过渡。
-  - **多段色彩耗时追踪轴（Timing Track）**：按比例切分模型推理生成耗时、工具外部执行耗时及其他编排调度开销，辅以首包延迟（TTFT）与解码吞吐速率（tok/s）。
-  - **轮次健康度与损耗归因**：直观的微型色块状态条（正常完成、执行失败、任务取消、手动中断），直观揭示异常中止轮次、废弃执行步数、LLM 重试次数以及命令重做率。
-  - **轮次执行脉冲时序（Activity Pulse）**：时序流中为每个交互轮次呈现持续耗时、关键行为脉冲点（用户、回复、工具、报错）与 Token 消耗比例条。
-  - **工具性能与数据载荷开销表**：排行各工具调用频次、耗时、报错率，并配以微型进度条对比工具返回字符量（Payload Volume），一眼识别吞吐瓶颈。
-  - **高频命令重做检测（Rework Detection）**：自动分析终端与脚本工具参数，揪出被反复重复调用的冗余命令。
-  - **数据通道**：利用本插件的 `/api/extra-prompt` 数据网关（`dashboard/data`）按需实时调取宿主 `readSessionDashboardFromHost`（`sessionQuery` / events / projections），不引入任何冗余第三方图表库，完全遵循 DSH 设计系统令牌（`--dsw-*`）。
-  - **图形全部是矢量**：环形图与时序图是本包自己的 SVG，小图标（元信息标签、刷新、协同效益四块、生命周期事件徽章、无重做提示）则全部取自宿主的 `Icon*OutlineRegular` 图标集，颜色继承 `currentColor`，随主题一起变。看板不出现任何 emoji 或字体字形充当的图形。
 
 ### MCP 服务器
 
@@ -277,7 +247,7 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 7. **MCP 是新增的，不是移植的。** Deeptop 的 MCP 在 `desktop-bridge/tool-config.mjs` 里，靠一个 JSON 配置文件加托管块标记，属于「不移植」的桌面桥接层；DSH 自己的 MCP 行则是手写在 `cordis.patch.yml` 里的字面量。本包把它改成在设置页编辑、由插件按条组合官方 `mcp-client` 实例，这是这一层唯一的新领域逻辑。
 8. **页面数据通道用 `connection.fetch.register()`，不用 `connection.rpc.handle()`。** 原因见「模型可见的 Skills」一节：后者在当前版本从插件 context 调用会抛 `webServer` 的 inject 错误。这是实测记录，不是偏好。
 9. **分组标签页固定五个，不随行的开关增减。** 早先的做法是「功能全关的分组连标签一起消失」（「技能」组用 `always` 豁免）；既然开关搬到了「插件」页，一个会把标签页抽走的配置页只会让人以为配置丢了。`always` 因此不再需要。
-10. **页面内的图形全部来自宿主的图标集，本包一个都不自绘。** 这与上面第 6 条（插件行图标是手写的 32×32 SVG 文件）不矛盾，两者是两回事：第 6 条说的是「插件」页读的那个**文件**图标，只能由本包提供；这里说的是设置页与看板**渲染出来的**小图形，宿主已经有一整套。早先这些位置画的是一批 emoji 与字体符号——卡片图标是对话气泡、分支、包裹、闪电、插头、拼图、罗盘（U+1F4AC / U+1F500 / U+1F4E6 / U+26A1 / U+1F50C / U+1F9E9 / U+1F9ED），看板协同块是火箭与注射器（U+1F680 / U+1F489），元信息标签是文件夹与秒表（U+1F4C1 / U+23F1），压缩与剪枝用剪刀、高效提示用勾选、高级设置的展开与收起用两个小三角、刷新用回转箭头（U+2702 / U+2713 / U+25BE / U+25B8 / U+21BB）。问题有三：emoji 是彩色的字体字形，会脱离 `--dsw-*` 主题、在深浅两种主题下不受控；它们在不同平台与字体下的字形、基线、宽度都不一样；以及它们不是矢量语义，混在官方图标旁边一眼就看得出是外来的。改用的宿主图标自带 `currentColor`、`aria-hidden` 与统一的 16×16 网格，观感与官方设置页一致。代价是这套名字成了对宿主的依赖，处理方式见上（钉死清单 + 中性回落）。
+10. **页面内的图形全部来自宿主的图标集，本包一个都不自绘。** 这与上面第 6 条（插件行图标是手写的 32×32 SVG 文件）不矛盾，两者是两回事：第 6 条说的是「插件」页读的那个**文件**图标，只能由本包提供；这里说的是设置页**渲染出来的**小图形，宿主已经有一整套。早先这些位置画的是一批 emoji 与字体符号——卡片图标是对话气泡、分支、包裹、闪电、插头、拼图、罗盘（U+1F4AC / U+1F500 / U+1F4E6 / U+26A1 / U+1F50C / U+1F9E9 / U+1F9ED），高级设置的展开与收起用两个小三角（U+25BE / U+25B8）。问题有三：emoji 是彩色的字体字形，会脱离 `--dsw-*` 主题、在深浅两种主题下不受控；它们在不同平台与字体下的字形、基线、宽度都不一样；以及它们不是矢量语义，混在官方图标旁边一眼就看得出是外来的。改用的宿主图标自带 `currentColor`、`aria-hidden` 与统一的 16×16 网格，观感与官方设置页一致。代价是这套名字成了对宿主的依赖，处理方式见上（钉死清单 + 中性回落）。
 
 ## 与原 Deeptop 插件的差异
 
@@ -326,17 +296,17 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 npm test          # 等价于 node --test "test/**/*.test.mjs"
 ```
 
-125 个用例，分三层：
+110 个用例，分三层：
 
-- **宿主层（80）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属、看板的汇总与生命周期事件），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
+- **宿主层（69）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
 - **行显示元数据（4）**：`test/row-metadata.test.mjs` 从 `cordis.patch.yml` 读出每一行，再按宿主 `readPluginMeta` 的同一套规则解析它的资源——`<行>/package.json` 与 `<行>/locale/en.json` 必须能通过 package exports 解析到、locale 文件名必须是语言 id、中英标题与说明都必须非空且互不相同（否则一页会显示另一页的语言）、图标必须是目录内的相对路径且类型与 256 KiB 都合规、SVG 要带 `viewBox` 且自包含；最后核对 `files` 确实包含这些文件（`link:` 安装看不出漏项，发布出去才知道）。
-- **浏览器半边（41）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、五个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
+- **浏览器半边（37）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、五个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
 
 其中三条值得单独说：
 
 - **MCP 规则是双份实现的，所以有一条逐例比对**：宿主 `src/mcp/model.mjs` 与浏览器半边各自判断同一份服务器文档，一个 20 行的表格逐例比较两边给出的「第几台、哪个字段」集合必须完全一致。写这条测试时它立刻抓到一处真实分歧（卡片在 `reconnect` 关闭时仍然管退避数字的上界，宿主不管），已按宿主行为修正。
 - **Skill 卡片的测试用的是真实请求/响应契约**：`fetch` 替身记录每一次调用并回放脚本化的宿主响应，因此断言的是「发了什么请求」（同一个 `/api/extra-prompt`、`credentials: 'same-origin'`、`{op, directoryName, installationId}`），渲染出的来源桶、工作区、目录与调用开关，以及失败后那一行还在、错误文案来自宿主。宿主那一侧则由 `test/settings-api-route.test.mjs` 用真注册表跑同一条路由：`list` 的入参必须是模型自己会用的 `{cwd, scope}`，只有目录与标记都认同的安装才带得出卸载按钮。
-- **图形的回归测试同时盯住「没有 emoji」和「图标真的画出来了」**：`PICTURE_GLYPH` 把 U+1F000–1FAFF 以外的 **U+2190–21FF 箭头、U+2300–23FF 技术符号、U+25A0–27BF 几何图形与装饰符号、U+2B00–2BFF** 也算进来——U+2702（剪刀）、U+25B8/U+25BE（展开三角）、U+21BB（刷新）与 U+2713（勾选）正是在这些区段里，只查「emoji」会全部漏掉。它先扫 `lib/client.js` 与 `src/session-dashboard/model.mjs` 的源码，再扫**真正渲染出来的文本树**（五个分组的卡片、Skill 卡片，以及带生命周期事件的看板），两侧都必须是空集；同时断言那些位置确实画出了对应的宿主图标（`data-icon` 标记），以及 `HOST_ICON_NAMES` 与钉死的清单逐字一致。还有三条单独验证回落、识别与「图形一律矢量」这条线本身：让替身故意**不提供** `IconSkillOutlineRegular`，页面必须照常渲染、画出一个不带宿主标记的 16×16 中性轮廓，而不是抛 `Element type is invalid`；让替身把某个图标**包成 `memo`/`forwardRef` 那种带 `$$typeof` 的对象**，页面必须照常认出它，而不是把所有图标一起降级成中性轮廓；以及给看板喂一份**旧格式的事件负载**——徽章里还带着 U+2702 这类字形——页面必须只显示文字 `压缩` 与矢量图标。第三条针对的是一个真实缺口：事件徽章是这一页唯一从线上来的文案，而它旁边已经画了 `kind` 的图标，页面若不自己拦一道，旧生产者送来的字形就会和图标一起出现，正是这次要消灭的「一个意思画两遍」。
+- **图形的回归测试同时盯住「没有 emoji」和「图标真的画出来了」**：`PICTURE_GLYPH` 把 U+1F000–1FAFF 以外的 **U+2190–21FF 箭头、U+2300–23FF 技术符号、U+25A0–27BF 几何图形与装饰符号、U+2B00–2BFF** 也算进来——U+25B8/U+25BE（展开三角）正是在这些区段里，只查「emoji」会全部漏掉。它先扫 `lib/client.js` 的源码，再扫**真正渲染出来的文本树**（五个分组的卡片与 Skill 卡片），两侧都必须是空集；同时断言那些位置确实画出了对应的宿主图标（`data-icon` 标记），以及 `HOST_ICON_NAMES` 与钉死的清单逐字一致。还有两条单独验证回落与识别这两条线本身：让替身故意**不提供** `IconSkillOutlineRegular`，页面必须照常渲染、画出一个不带宿主标记的 16×16 中性轮廓，而不是抛 `Element type is invalid`；让替身把某个图标**包成 `memo`/`forwardRef` 那种带 `$$typeof` 的对象**，页面必须照常认出它，而不是把所有图标一起降级成中性轮廓。
 
 React 替身实现了依赖比较和 cleanup 的 `useEffect`（`useForm` 是在 effect 里刷新快照并订阅的，effect 不跑的话面板会停在首帧值，写入断言就没有意义），并在渲染后按 React 的顺序冲刷 effect、必要时再渲染一次。hook 单元既按位置、也按组件函数区分——同一个位置上换了组件（一个功能卡片和 Skill 管理卡片都可能是面板的第一个子节点）必须像 React 那样重新挂载，否则第二个组件会读到第一个的 state。设置组件替身复现的是宿主的 prop 契约（含保存按钮 `!dirty || invalid || saving` 的禁用规则），而不是它们的渲染与样式。
 
