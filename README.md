@@ -1,6 +1,6 @@
 # dsh-extra-prompt
 
-把 [Deeptop](../DSH-Desktop) 的四个 Cordis 插件合并过来，补上 MCP 接入与 Skill 管理，做成一个可直接装进 DSH 的插件包。**每个功能是「插件」页里独立的一行**，开与关就是那一行的开关；设置页只编辑它们的配置：
+把 [Deeptop](../DSH-Desktop) 的四个 Cordis 插件合并过来，补上 MCP 接入、Skill 管理与图片生成，做成一个可直接装进 DSH 的插件包。**每个功能是「插件」页里独立的一行**，开与关就是那一行的开关；设置页只编辑它们的配置：
 
 | 能力 | 作用 | 行 id |
 | --- | --- | --- |
@@ -9,6 +9,7 @@
 | Skill 安装 | 提供 `skill-install` 工具，从 git 或压缩包安装 Skill 到当前 profile | `extra-skill-installer` |
 | rtk 输出压缩 | 对 `git status` / `git diff` / `git log` / `rg` / `grep` 的输出做压缩 | `extra-rtk-compact` |
 | MCP 服务器 | 每台服务器组合一个官方 `dsh-mcp-client` 实例，它的工具以 `mcp__<服务器名>__<工具名>` 交给模型 | `extra-mcp` |
+| 图片生成 | 提供 `image_gen` 工具，按配置的模型调用 generate/edit 端点生成或编辑图片 | `extra-image-gen` |
 
 设置页另有一张不属于任何配置命名空间的卡片：**模型可见的 Skills**。它列出模型当前真正能读取到的 Skill（工作区与用户级目录、自定义与内置目录、插件运行期 Skill），并允许卸载本包装过的那些（数据来自一个 `/api` 路由，见下）。
 
@@ -26,13 +27,14 @@ DSH 用「profile 里的一行插件的 `id`」同时作为它的设置命名空
 | `extra-skill-installer` | `dsh-extra-prompt/skill-installer` | `tools` | Skill 安装 | `src/skill-installer/` |
 | `extra-rtk-compact` | `dsh-extra-prompt/rtk-compact` | `subprocess`、`timer` | rtk 输出压缩 | `src/rtk-compact/` |
 | `extra-mcp` | `dsh-extra-prompt/mcp` | `tools` | MCP 服务器 | `src/mcp/` |
+| `extra-image-gen` | `dsh-extra-prompt/image-gen` | `tools` | 图片生成 | `src/image-gen/` |
 | `extra-settings-api` | `dsh-extra-prompt/settings-api` | `connection` | 无（页面数据通道） | `src/settings-api/` |
 | `extra-web-search-tavily` | `dsh-extra-prompt/web-search-tavily` | `web` | 无（注册搜索源） | `src/web-search-tavily/` |
 
 三点必须一起成立，否则设置页看不到对应卡片：
 
 1. 第一行必须从**裸包名**挂载。浏览器的插件模块表按包名索引，`client-modules` 只会把浏览器半边挂到「specifier 就是裸包名」的那一行；从子路径导出的行不会带上浏览器半边。
-2. 五个功能行必须**各自独立**，因为它们的 `inject` 集合互不相同，一个插件无法同时满足。最后两行同样独立：`inject: ['connection']` 在没有 Web 传输的宿主上永远不会落定，不能让它拖住任何功能行。
+2. 六个功能行必须**各自独立**——每行一个设置命名空间，且 `inject` 集合互不相同，一个插件无法同时满足。最后两行同样独立：`inject: ['connection']` 在没有 Web 传输的宿主上永远不会落定，不能让它拖住任何功能行。
 3. 每个可编辑字段都标了 `.volatile()`。DSH 只把 volatile 字段投影给设置页，非 volatile 字段既不出现在表单里，也不接受热更新。
 
 ### 一行一个开关
@@ -55,7 +57,7 @@ DSH 用「profile 里的一行插件的 `id`」同时作为它的设置命名空
 dsh plugin --profile <profile> add <包目录或包名>
 ```
 
-pnpm 会把本目录以 `link:` 形式装进 profile；`dsh` 因为 `package.json` 声明了 `dsh.bundle.patch`，把 `dsh-extra-prompt` 追加进该 profile 的 `dsh.profile.bundles`，`cordis.patch.yml` 里的八行随后自动生效。
+pnpm 会把本目录以 `link:` 形式装进 profile；`dsh` 因为 `package.json` 声明了 `dsh.bundle.patch`，把 `dsh-extra-prompt` 追加进该 profile 的 `dsh.profile.bundles`，`cordis.patch.yml` 里的九行随后自动生效。
 
 `--profile desktop` 会被拒绝：desktop profile 由 Electron 应用独占管理（`error: profile "desktop" is managed exclusively by the Electron application`）。要改桌面端，用应用内的插件页面，或直接编辑 `~/.dsh/profiles/desktop/cordis.patch.yml` 与 `package.json`。开发请在自定义 profile 里做：
 
@@ -67,7 +69,7 @@ dsh --profile dev --from-default-profile web
 
 DSH 给 Node 的 ESM/CJS 解析器装了一层拦截（`packages/boot/app-boot/src/profile-resolution/resolver.ts`），用来把插件 import 的宿主包路由到运行中的副本。这层拦截只对两类模块生效：位于 profiles 目录树内的，或已注册为 linked root 的。
 
-本包的五个宿主入口都 import `@deepseek-ai/schemastery`（`prompt-injection` 另加 `dsh-llm`，`skill-installer` 另加 `dsh-tools`，`mcp` 另加 `dsh-mcp-client`）。这些包是 vendored 且 `private: true`，不在 npm 上，只能靠这层拦截拿到宿主自带的副本。而 `D:/Code/dsh-extra-prompt` 两者都不是：指向目录本身先撞 `ERR_UNSUPPORTED_DIR_IMPORT`，指向具体文件则 `ERR_MODULE_NOT_FOUND`。
+本包的六个宿主入口都 import `@deepseek-ai/schemastery`（`prompt-injection` 另加 `dsh-llm`，`skill-installer` 另加 `dsh-tools`，`mcp` 另加 `dsh-mcp-client`，`image-gen` 另加 `dsh-tools`）。这些包是 vendored 且 `private: true`，不在 npm 上，只能靠这层拦截拿到宿主自带的副本。而 `D:/Code/dsh-extra-prompt` 两者都不是：指向目录本身先撞 `ERR_UNSUPPORTED_DIR_IMPORT`，指向具体文件则 `ERR_MODULE_NOT_FOUND`。
 
 所以 `package.json` 把这四个宿主包同时声明在 `peerDependencies` 和 `devDependencies`。linked root 的解析会在导入者的祖先目录里读它自己的 `peerDependencies`（`routeLinked` 里的 `readPeerNames`），命中即路由到宿主副本。DSH 只按名字匹配、不校验版本区间，因此这里写 `*`——这也让本包不受 `vendor/`（0.1.7-rc.2）与已安装桌面端（0.2.0-rc.2）之间的版本漂移影响。`dsh-mcp-client` 虽然不在 profile 自己的 `node_modules` 里，但只要声明了这个名字就能解析到宿主副本：实测 `extra-mcp` 能组合出真实实例。
 
@@ -98,7 +100,7 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 | 功能分组的标签栏 | `SegmentedControl`（`role="tablist"`，页面持有选中项并把面板的 `id`/`aria-labelledby` 接回去） |
 | 页面与卡片上的小图标 | `ui-primitives` 自带的 `Icon*OutlineRegular` 组件 |
 
-**图标一律用宿主的图标集，没有一个是本包自己画的，也没有一个 emoji。** 页面上的每个图形——页头与五张功能卡片的标题——都是 `ui-primitives` 导出的 `Icon*OutlineRegular` 组件：16×16 的 `viewBox`、`fill:none`、`stroke:currentColor`、`aria-hidden`，尺寸与描边和官方设置页旁边的图标完全一致。这套图标跟着主题走（颜色靠 `currentColor` 继承），因此不会出现「emoji 在深色主题里是彩色方块、在浅色主题里是另一副样子」这种问题。
+**图标一律用宿主的图标集，没有一个是本包自己画的，也没有一个 emoji。** 页面上的每个图形——页头与六张功能卡片的标题——都是 `ui-primitives` 导出的 `Icon*OutlineRegular` 组件：16×16 的 `viewBox`、`fill:none`、`stroke:currentColor`、`aria-hidden`，尺寸与描边和官方设置页旁边的图标完全一致。这套图标跟着主题走（颜色靠 `currentColor` 继承），因此不会出现「emoji 在深色主题里是彩色方块、在浅色主题里是另一副样子」这种问题。
 
 尺寸也不是拍脑袋定的，而是照宿主自己的用法抄：卡片与页头用 16px，MCP 卡片里「高级设置」那颗 chevron 走 `Button` 的 `icon` 槽并用 13px（宿主自己的 `Button size="sm"` 调用点就是 13px）。这两档都钉在测试里。
 
@@ -112,7 +114,7 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 
 ### 卡片
 
-五个命名空间各一张卡片，再加上「技能」组里那张「模型可见的 Skills」。每张卡片是「标题 + 摘要 +（可选）仓库链接 +（可选）机器事实 + 字段 + 保存」。rtk 卡片多一行机器事实：宿主报告这台机器没有 `rtk` 时写「本机没有找到 rtk 可执行文件，工具输出会原样通过……」，找到时写出它用的那个可执行文件路径，问不到（老宿主或没有该查询接口）就什么都不写——没有结论好过编一个。
+六个命名空间各一张卡片，再加上「技能」组里那张「模型可见的 Skills」。每张卡片是「标题 + 摘要 +（可选）仓库链接 +（可选）机器事实 + 字段 + 保存」。rtk 卡片多一行机器事实：宿主报告这台机器没有 `rtk` 时写「本机没有找到 rtk 可执行文件，工具输出会原样通过……」，找到时写出它用的那个可执行文件路径，问不到（老宿主或没有该查询接口）就什么都不写——没有结论好过编一个。
 
 行没有挂载时（比如在「插件」页把它关掉了），卡片照样在，但走宿主 `SettingsForm` 的 `unavailable` 状态，文案是「这一行没有挂载：在「插件」页打开它的开关后，这里才能编辑。」——宿主不会为一个没挂载的插件提供表单，把原因说出来比渲染一堆点不动的控件好。
 
@@ -129,7 +131,7 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 
 ### 分组 Tab
 
-卡片多了以后一页滚不完，所以页头下面是宿主的 `SegmentedControl`：提示词 / 子代理路由 / 技能 / 输出压缩 / MCP，每组只渲染当前这一组的卡片或视图。**五个分组始终都在**——页面形状由包决定，不由 profile 决定：某一行关掉了，它的标签页不会消失，只是那一张卡片显示成「没有挂载」，从「插件」页打开后又带着原来的配置回来。选中项因此不会指向一个不存在的分组。
+卡片多了以后一页滚不完，所以页头下面是宿主的 `SegmentedControl`：提示词 / 子代理路由 / 技能 / 输出压缩 / MCP / 图片生成，每组只渲染当前这一组的卡片或视图。**六个分组始终都在**——页面形状由包决定，不由 profile 决定：某一行关掉了，它的标签页不会消失，只是那一张卡片显示成「没有挂载」，从「插件」页打开后又带着原来的配置回来。选中项因此不会指向一个不存在的分组。
 
 ### MCP 服务器
 
@@ -139,6 +141,14 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 - 只有已启用的服务器会被组合，关掉的不占工具命名空间也不起进程；改动连接参数会重建那一个实例，只翻开关不会（宿主用的 `specKey` 忽略 `enabled`，它改变的是「在不在」，不是连接参数）。
 - 卡片按宿主同一套规则做阻塞式校验（名称形状与唯一性、两种传输各自的必填项、环境变量/请求头名是否合法、数值上下界、最多 64 台），不合规不允许保存，错误逐条挂在对应的服务器下面。这套规则在宿主（`src/mcp/model.mjs`）和浏览器半边各写了一份——产物是 classic script，没法 import 宿主模块——由测试逐例比对两边答案一致。
 - **环境变量与请求头的值以明文保存在 profile 的 `cordis.patch.yml` 里**，卡片上写明了这一点。官方 `mcp-client` 的配置只接受字面量（`env`/`headers` 都是 `Record<string,string>`），DeepSeek provider 那种「只存引用、每次请求再解析」的路径在这里不成立，何况 stdio 的 `env` 是起子进程时就定下的。所以本包不假装提供凭据引用，而是把明文这件事直接说出来。
+
+### 图片生成
+
+`image_gen` 是一个会向外发请求、再把结果写到磁盘的工具。它不自己实现生图，只把调用转给设置里配置的 OpenAI 兼容 images 接口：没有参考图时走 `POST /images/generations`（JSON），给了参考图时走 `POST /images/edits`（multipart）。接口形状跟 OpenAI 走，是因为 GPUStack、vLLM、one-api 这类兼容网关都实现这一套，换一个服务商只需要改 `baseURL`、`model` 与凭据名。
+
+端点不是写死的：显式 `mode` 优先；没有 `mode` 但有 `images` 时自动走 edit（服务商没有输入图也做不了编辑，这一点不该让模型自己记住）；两者都没有才用设置里的默认端点。参数是 `prompt`（必填）、`mode`、`images`（本地路径或 http(s) URL，绝对路径或相对会话 cwd）、`mask`（仅 edit，形式同 `images`）、`size`、`quality`、`n`。`size` / `quality` 不填就用设置里的默认值，两者都为空时不发这个字段；`n` 不填只请求一张，只有大于 1 才发送。`edit` 至少要有一张参考图，缺了直接报错，而不是把一次注定失败的请求发给服务商。
+
+结果先落盘，工具返回的是**绝对路径**，并附上 media type 与字节数（进入附件时还有尺寸和服务商回的修订提示词）。当前模型路由声明了 `image` 输入、且宿主提供附件存储时，图片还会存进会话附件随工具结果一起回传，模型能直接读到；路由能力未知或只收文本时只回路径——文件已经写好了，没必要为了一张图让整段会话无法继续。支持 png / jpeg / webp / gif，类型按字节的 magic bytes 判定，不信 `content-type` 和扩展名；不认识的格式仍然落盘，只是不进附件。文件名是 `image-<UTC 时间戳>-<随机段>-<序号>.<扩展名>`：UTC 让名字不随夏令时跳变，随机段分开同一秒内的两次调用，序号分开同一次调用的多张图；写入用 `wx`，同名不会被覆盖，冲突会直接报错。单张上限 64MB，下载时同时看 `content-length` 与实际字节。HTTP 错误、超时、应答里没有图片都会作为工具错误明确报出，并带上服务商的 `error.message`；超时单独说「请求超时（N 毫秒）」。
 
 ### 模型可见的 Skills
 
@@ -219,6 +229,21 @@ DSH 里插件配置的**规范位置**是 Plugins 页的 `plugins.row.config`（
 
 这一格不是单个控件而是列表编辑器：每个条目自成一个 `dsh-mcp-client` 实例，字段与官方 `mcp-client` 的 `Config` 一一对应，本包只负责把它编辑并组合起来。列表里每台的 `enabled` 与行开关不是一回事：行开关决定「MCP 这一层在不在」，条目开关决定「这一台连不连」。
 
+**extra-image-gen**
+
+| 字段 | 类型 | 默认 |
+| --- | --- | --- |
+| `baseURL` | 文本 | `https://api.openai.com/v1` |
+| `apiKeyEnv` | 文本（凭据引用） | `IMAGE_API_KEY` |
+| `model` | 文本 | 空（未配置时工具直接报错） |
+| `endpoint` | `generate` / `edit` | `generate` |
+| `size` | 文本 | 空（不发送） |
+| `quality` | 文本 | 空（不发送） |
+| `outputDir` | 文本 | 空（`<DSH_HOME>/generated-images`） |
+| `timeoutMs` | 数字 | `120000` |
+
+`model` 是发给服务商的模型名（例如 `gpt-image-1`），留空时工具直接报错；`size` / `quality` 是每次调用的默认值，留空则不发送该字段（空字符串与「用服务商默认」不是一回事）。`apiKeyEnv` 是**引用**而不是密钥：这里写凭据名或环境变量名，调用时由 `ctx.credentials` 解析（解析不到再看进程环境），密钥本身不进设置文档；本地网关不需要密钥时留空。`baseURL` 接受服务根、以 `/images` 结尾的目录或完整端点，完整端点会被改写成当前调用的那个端点，所以从服务商文档里复制哪一种都能用。`outputDir` 留空落在 `<DSH_HOME>/generated-images`，相对路径按会话 cwd 解析，`~` 会展开。`endpoint` 只是「没有参考图且没显式传 `mode`」时的默认值：显式 `mode` 始终优先，有参考图则自动走 edit。`timeoutMs` 同时管请求本身的超时。
+
 ## 为什么没有构建步骤
 
 `lib/client.js` 是**手写**的浏览器产物，不是生成的。这是可行且经过验证的选择，不是走捷径：
@@ -234,11 +259,11 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 
 `id` 必须等于 `package.json` 的包名——模块表和 `/plugins/<id>/client.js` 路由都按包名索引。浏览器侧只有 8 个 baseline 模块可以直接 `require`，本包用其中两个：`react` 和 `@deepseek-ai/dsh-client-ui-primitives`（设置页组件，见下）。
 
-宿主侧是纯 ESM（`"type": "module"`），八个入口都是函数插件（具名导出 `name` / `inject` / `Config` / `apply`，没有 default export）。本包没有任何 `dependencies`：`@deepseek-ai/schemastery`、`dsh-llm`、`dsh-tools` 由宿主的解析拦截层提供，因此只声明在 `peerDependencies` 与 `devDependencies`（原因见「为什么不能只按绝对路径挂载」）。插件本体放在 `src/<feature>/index.mjs`，纯逻辑放在同目录的 `model.mjs`（不 import 任何宿主 API），纯逻辑因此可以在 DSH 之外用 `node --test` 直接测。
+宿主侧是纯 ESM（`"type": "module"`），九个入口都是函数插件（具名导出 `name` / `inject` / `Config` / `apply`，没有 default export）。本包没有任何 `dependencies`：`@deepseek-ai/schemastery`、`dsh-llm`、`dsh-tools` 由宿主的解析拦截层提供，因此只声明在 `peerDependencies` 与 `devDependencies`（原因见「为什么不能只按绝对路径挂载」）。插件本体放在 `src/<feature>/index.mjs`，纯逻辑放在同目录的 `model.mjs`（不 import 任何宿主 API），纯逻辑因此可以在 DSH 之外用 `node --test` 直接测。
 
 ## 与 DSH 惯例的有意偏离
 
-1. **无条件注册 `settings.section`，而不是 `configForms.whileServed(...)`。** 这五个命名空间由本包自己的行提供，页面不可能指向别人的命名空间；让没挂载的行显示成「这一行没有挂载」并指出到哪里打开，比整页消失更好排查。
+1. **无条件注册 `settings.section`，而不是 `configForms.whileServed(...)`。** 这六个命名空间由本包自己的行提供，页面不可能指向别人的命名空间；让没挂载的行显示成「这一行没有挂载」并指出到哪里打开，比整页消失更好排查。
 2. **订阅用 `React.useState` / `useEffect` 直接做，而不是渲染器的 `inject.hooks` 隔间。** 那个通道需要仓库内的框架钩子；`ConfigForm` 的 `getSnapshot()` / `subscribe()` 本身就是普通可观察对象，效果等价。若今后要上游化，这里应改成 hooks 隔间。
 3. **UI 文案是硬编码中文，没有走 locale 字典。** 槽位标签的类型是 `SlotLabel = string | (() => string)`，字符串完全合法。若上游化，会被 `verify-client-ui-i18n` 拦下。
 4. **`enabled` 字段被移除，开关交还给「插件」页的行。** 早期版本给四个功能各加了一个 `enabled` 布尔字段，好让设置页顶部那张启用卡片用同一种方式开关它们；这与 DSH 的惯例相反（惯例是整行 `disabled`／`enabled`，配置里不放开关），也让同一个功能有两级语义不同的开关。现在每个功能的开关就是那一行：关掉会卸载 fiber，工具、注入、system prompt 段落、模型目录说明一起消失。默认值是 schema 默认，配置里不再需要写 `enabled`；旧配置里若留着这个键，请删掉（它现在是未知字段）。
@@ -246,7 +271,7 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 6. **每个功能都有显示元数据文件，插件页才能显示得像官方行。** 插件页读的是 `<行目录>/package.json` 与 `locale/{en,zh}.json`，不是运行中的插件；`package.json` 里为此补了 `"./<name>/package.json"` 与 `"./<name>/locale/*.json"` 两组导出（没有导出，解析器就找不到文件，行会显示成包内路径）。图标是手写的 32×32 SVG。
 7. **MCP 是新增的，不是移植的。** Deeptop 的 MCP 在 `desktop-bridge/tool-config.mjs` 里，靠一个 JSON 配置文件加托管块标记，属于「不移植」的桌面桥接层；DSH 自己的 MCP 行则是手写在 `cordis.patch.yml` 里的字面量。本包把它改成在设置页编辑、由插件按条组合官方 `mcp-client` 实例，这是这一层唯一的新领域逻辑。
 8. **页面数据通道用 `connection.fetch.register()`，不用 `connection.rpc.handle()`。** 原因见「模型可见的 Skills」一节：后者在当前版本从插件 context 调用会抛 `webServer` 的 inject 错误。这是实测记录，不是偏好。
-9. **分组标签页固定五个，不随行的开关增减。** 早先的做法是「功能全关的分组连标签一起消失」（「技能」组用 `always` 豁免）；既然开关搬到了「插件」页，一个会把标签页抽走的配置页只会让人以为配置丢了。`always` 因此不再需要。
+9. **分组标签页固定六个，不随行的开关增减。** 早先的做法是「功能全关的分组连标签一起消失」（「技能」组用 `always` 豁免）；既然开关搬到了「插件」页，一个会把标签页抽走的配置页只会让人以为配置丢了。`always` 因此不再需要。
 10. **页面内的图形全部来自宿主的图标集，本包一个都不自绘。** 这与上面第 6 条（插件行图标是手写的 32×32 SVG 文件）不矛盾，两者是两回事：第 6 条说的是「插件」页读的那个**文件**图标，只能由本包提供；这里说的是设置页**渲染出来的**小图形，宿主已经有一整套。早先这些位置画的是一批 emoji 与字体符号——卡片图标是对话气泡、分支、包裹、闪电、插头、拼图、罗盘（U+1F4AC / U+1F500 / U+1F4E6 / U+26A1 / U+1F50C / U+1F9E9 / U+1F9ED），高级设置的展开与收起用两个小三角（U+25BE / U+25B8）。问题有三：emoji 是彩色的字体字形，会脱离 `--dsw-*` 主题、在深浅两种主题下不受控；它们在不同平台与字体下的字形、基线、宽度都不一样；以及它们不是矢量语义，混在官方图标旁边一眼就看得出是外来的。改用的宿主图标自带 `currentColor`、`aria-hidden` 与统一的 16×16 网格，观感与官方设置页一致。代价是这套名字成了对宿主的依赖，处理方式见上（钉死清单 + 中性回落）。
 
 ## 与原 Deeptop 插件的差异
@@ -271,8 +296,8 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 
 在一个自定义 profile 里实测（`dsh --profile extra-dev --from-default-profile web`，再 `dsh plugin --profile extra-dev add D:\Code\dsh-extra-prompt`）：
 
-- `--dump-config` 出现 `# == dsh-extra-prompt` 层，八行 id 与 name 正确。
-- 启动时没有 `did not activate` 警告，八行全部激活。
+- `--dump-config` 出现 `# == dsh-extra-prompt` 层，九行 id 与 name 正确。
+- 启动时没有 `did not activate` 警告，九行全部激活。
 - `__DSH_BOOT__` 中出现 `{"id":"dsh-extra-prompt","url":"plugins/??dsh-extra-prompt/client.js&rev=…","inject":["@deepseek-ai/dsh-client-ui-settings"]}`，浏览器半边已被发现。
 - 该 URL 返回 200，内容是 `__ModuleLoader__.load` 注册的产物，且包含 `settings.section` 注册；产物里 `require` 的两个模块都在 shell 的基线模块表内（已在实际安装的 0.2.0-rc.2 客户端产物中确认 `SettingsForm` / `SettingsValueField` / `Switch` 等导出存在）。
 
@@ -296,17 +321,17 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 npm test          # 等价于 node --test "test/**/*.test.mjs"
 ```
 
-110 个用例，分三层：
+124 个用例，分三层：
 
-- **宿主层（69）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
+- **宿主层（83）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属，以及 `test/image-gen-model.test.mjs` 覆盖的图片生成协议：端点 URL、模式选择、generate JSON 体、edit multipart、base64 与 url 两种应答、错误应答、magic bytes 与文件名），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
 - **行显示元数据（4）**：`test/row-metadata.test.mjs` 从 `cordis.patch.yml` 读出每一行，再按宿主 `readPluginMeta` 的同一套规则解析它的资源——`<行>/package.json` 与 `<行>/locale/en.json` 必须能通过 package exports 解析到、locale 文件名必须是语言 id、中英标题与说明都必须非空且互不相同（否则一页会显示另一页的语言）、图标必须是目录内的相对路径且类型与 256 KiB 都合规、SVG 要带 `viewBox` 且自包含；最后核对 `files` 确实包含这些文件（`link:` 安装看不出漏项，发布出去才知道）。
-- **浏览器半边（37）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、五个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
+- **浏览器半边（37）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、六个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
 
 其中三条值得单独说：
 
 - **MCP 规则是双份实现的，所以有一条逐例比对**：宿主 `src/mcp/model.mjs` 与浏览器半边各自判断同一份服务器文档，一个 20 行的表格逐例比较两边给出的「第几台、哪个字段」集合必须完全一致。写这条测试时它立刻抓到一处真实分歧（卡片在 `reconnect` 关闭时仍然管退避数字的上界，宿主不管），已按宿主行为修正。
 - **Skill 卡片的测试用的是真实请求/响应契约**：`fetch` 替身记录每一次调用并回放脚本化的宿主响应，因此断言的是「发了什么请求」（同一个 `/api/extra-prompt`、`credentials: 'same-origin'`、`{op, directoryName, installationId}`），渲染出的来源桶、工作区、目录与调用开关，以及失败后那一行还在、错误文案来自宿主。宿主那一侧则由 `test/settings-api-route.test.mjs` 用真注册表跑同一条路由：`list` 的入参必须是模型自己会用的 `{cwd, scope}`，只有目录与标记都认同的安装才带得出卸载按钮。
-- **图形的回归测试同时盯住「没有 emoji」和「图标真的画出来了」**：`PICTURE_GLYPH` 把 U+1F000–1FAFF 以外的 **U+2190–21FF 箭头、U+2300–23FF 技术符号、U+25A0–27BF 几何图形与装饰符号、U+2B00–2BFF** 也算进来——U+25B8/U+25BE（展开三角）正是在这些区段里，只查「emoji」会全部漏掉。它先扫 `lib/client.js` 的源码，再扫**真正渲染出来的文本树**（五个分组的卡片与 Skill 卡片），两侧都必须是空集；同时断言那些位置确实画出了对应的宿主图标（`data-icon` 标记），以及 `HOST_ICON_NAMES` 与钉死的清单逐字一致。还有两条单独验证回落与识别这两条线本身：让替身故意**不提供** `IconSkillOutlineRegular`，页面必须照常渲染、画出一个不带宿主标记的 16×16 中性轮廓，而不是抛 `Element type is invalid`；让替身把某个图标**包成 `memo`/`forwardRef` 那种带 `$$typeof` 的对象**，页面必须照常认出它，而不是把所有图标一起降级成中性轮廓。
+- **图形的回归测试同时盯住「没有 emoji」和「图标真的画出来了」**：`PICTURE_GLYPH` 把 U+1F000–1FAFF 以外的 **U+2190–21FF 箭头、U+2300–23FF 技术符号、U+25A0–27BF 几何图形与装饰符号、U+2B00–2BFF** 也算进来——U+25B8/U+25BE（展开三角）正是在这些区段里，只查「emoji」会全部漏掉。它先扫 `lib/client.js` 的源码，再扫**真正渲染出来的文本树**（六个分组的卡片与 Skill 卡片），两侧都必须是空集；同时断言那些位置确实画出了对应的宿主图标（`data-icon` 标记），以及 `HOST_ICON_NAMES` 与钉死的清单逐字一致。还有两条单独验证回落与识别这两条线本身：让替身故意**不提供** `IconSkillOutlineRegular`，页面必须照常渲染、画出一个不带宿主标记的 16×16 中性轮廓，而不是抛 `Element type is invalid`；让替身把某个图标**包成 `memo`/`forwardRef` 那种带 `$$typeof` 的对象**，页面必须照常认出它，而不是把所有图标一起降级成中性轮廓。
 
 React 替身实现了依赖比较和 cleanup 的 `useEffect`（`useForm` 是在 effect 里刷新快照并订阅的，effect 不跑的话面板会停在首帧值，写入断言就没有意义），并在渲染后按 React 的顺序冲刷 effect、必要时再渲染一次。hook 单元既按位置、也按组件函数区分——同一个位置上换了组件（一个功能卡片和 Skill 管理卡片都可能是面板的第一个子节点）必须像 React 那样重新挂载，否则第二个组件会读到第一个的 state。设置组件替身复现的是宿主的 prop 契约（含保存按钮 `!dirty || invalid || saving` 的禁用规则），而不是它们的渲染与样式。
 

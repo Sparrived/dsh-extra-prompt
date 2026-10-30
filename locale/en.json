@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "dsh-extra-prompt",
-    "description": "Prompt injection, subagent routing, Skill install, rtk compaction, MCP servers — one switchable row each."
+    "description": "Prompt injection, subagent routing, Skill install, rtk compaction, MCP servers and image generation — one switchable row each."
   }
 }

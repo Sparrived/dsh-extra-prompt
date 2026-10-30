@@ -8,11 +8,12 @@
 // /plugins/dsh-extra-prompt/client.js. Switching this row off on the 「插件」 page
 // takes the page with it.
 //
-// Every real feature lives on a subpath row (five of them, plus the settings
-// page's data channel and the Tavily search provider), because their Cordis
-// `inject` sets differ and no single plugin could serve them all. This row has no
-// host behaviour, which matches the upstream pattern for a surface-only companion
-// package: an empty apply keeps the row loadable.
+// Every real feature lives on a subpath row (six of them, plus the settings
+// page's data channel and the Tavily search provider), because every feature owns
+// its own settings namespace and their Cordis `inject` sets differ; no single
+// plugin could serve them all. This row has no host behaviour, which matches the
+// upstream pattern for a surface-only companion package: an empty apply keeps the
+// row loadable.
 
 /** Host plugin body — no host-side behavior for this surface row. */
 export function apply() {}

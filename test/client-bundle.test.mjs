@@ -71,6 +71,7 @@ const NAMESPACES = [
   'extra-skill-installer',
   'extra-rtk-compact',
   'extra-mcp',
+  'extra-image-gen',
 ]
 
 /**
@@ -121,7 +122,7 @@ function h(type, props, ...children) {
 /**
  * A React stand-in with per-render-position hook cells.
  *
- * Cells are keyed by tree path so the five `Panel` instances — which share one
+ * Cells are keyed by tree path so the six `Panel` instances — which share one
  * component function — keep separate state, and so the same path re-reads the
  * same cell on a later render pass. `useEffect` really runs (with a dependency
  * guard and cleanup), because `useForm` refreshes its snapshot and subscribes
@@ -232,7 +233,7 @@ function render(element, path) {
     }
   }
   // A host element still has to have its children rendered: nested function
-  // components (the five panels, every field control) are invoked from here.
+  // components (the six panels, every field control) are invoked from here.
   const children = element.props.children
   if (children === undefined) return element
   return { type: element.type, props: Object.assign({}, element.props, { children: render(children, path) }) }
@@ -595,6 +596,7 @@ const TAB_OF = {
   'extra-skill-installer': 'skill',
   'extra-rtk-compact': 'rtk',
   'extra-mcp': 'mcp',
+  'extra-image-gen': 'image',
 }
 
 /** Every tab button the page currently shows, in bar order. */
@@ -727,6 +729,7 @@ const CARD_ICON_OF = {
   'extra-skill-installer': 'IconSkillOutlineRegular',
   'extra-rtk-compact': 'IconCompactOutlineRegular',
   'extra-mcp': 'IconApiOutlineRegular',
+  'extra-image-gen': 'IconApiOutlineRegular',
 }
 
 test('names only host icons from the pinned set, and actually draws them', async () => {
@@ -831,6 +834,16 @@ test('renders every declared field for every namespace', async () => {
   const { registered } = await boot({
     'extra-rtk-compact': { rtkPath: '', minBodyChars: 1200, timeoutMs: 20000, maxOutputBytes: 4194304, gitStatus: true, gitDiff: true, gitLog: true, rg: true, grep: true },
     'extra-subagent-routing': { routes: [{ provider: 'deepseek-official', model: 'deepseek-v4-pro', note: '疑难推理' }], guidance: '' },
+    'extra-image-gen': {
+      baseURL: 'https://api.openai.com/v1',
+      apiKeyEnv: 'IMAGE_API_KEY',
+      model: 'gpt-image-1',
+      endpoint: 'edit',
+      size: '1024x1024',
+      quality: 'high',
+      outputDir: '',
+      timeoutMs: 120000,
+    },
   })
 
   // The page holds no switch of its own: every feature is a row, switched on the
@@ -838,9 +851,9 @@ test('renders every declared field for every namespace', async () => {
   const page = renderPage(registered)
   assert.equal(findAll(page, node => node.props['data-namespace'] === 'enable').length, 0)
 
-  // Five groups: prompt / routing / skill (two namespaces) / rtk / mcp.
-  assert.deepEqual(tabsOf(page).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
-  assert.deepEqual(tabsOf(page).map(node => textOf(node)), ['提示词', '子代理路由', '技能', '输出压缩', 'MCP'])
+  // Six groups: prompt / routing / skill (two namespaces) / rtk / mcp / image.
+  assert.deepEqual(tabsOf(page).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'image'])
+  assert.deepEqual(tabsOf(page).map(node => textOf(node)), ['提示词', '子代理路由', '技能', '输出压缩', 'MCP', '图片生成'])
 
   // Only the active group's cards are in the tree.
   assert.equal(findAll(page, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 0)
@@ -859,7 +872,8 @@ test('renders every declared field for every namespace', async () => {
   const skill = renderPage(registered, 'extra-skill-installer')
   assert.equal(findAll(skill, node => node.props['data-namespace'] === 'extra-skill-installer').length, 1)
   assert.equal(findAll(skill, node => node.type === 'textarea').length, 0)
-  // The installer card owns the page's one enum.
+  // The installer card's own enum: the default install method. The feature's switch
+  // is its row, not a field here.
   const selects = findAll(skill, node => node.type === 'select')
   assert.equal(selects.length, 1)
   assert.deepEqual(selects[0].props.children.map(option => option.props.value), ['auto', 'download', 'git'])
@@ -884,6 +898,30 @@ test('renders every declared field for every namespace', async () => {
   assert.ok(textOf(mcp).includes('还没有配置任何 MCP 服务器。'))
   assert.ok(textOf(mcp).includes('添加服务器'))
   assert.equal(findAll(mcp, node => node.props.className === 'dsh-extra-server').length, 0)
+
+  // The image group: one card carries all eight fields — six single-line text
+  // inputs, the default-endpoint enum and the numeric timeout — and no switch of
+  // its own, because the feature's on/off is its row.
+  const image = renderPage(registered, 'extra-image-gen')
+  assert.equal(findAll(image, node => node.props['data-namespace'] === 'extra-image-gen').length, 1)
+  const imageCard = sectionOf(image, 'extra-image-gen')
+  const imageText = findAll(imageCard, node => node.type === 'input' && node.props.inputMode !== 'numeric')
+  assert.equal(imageText.length, 6)
+  assert.deepEqual(imageText.map(node => node.props.value), [
+    'https://api.openai.com/v1', 'IMAGE_API_KEY', 'gpt-image-1', '1024x1024', 'high', '',
+  ])
+  assert.equal(imageText[0].props.placeholder, 'https://api.openai.com/v1')
+  const imageSelects = findAll(imageCard, node => node.type === 'select')
+  assert.equal(imageSelects.length, 1)
+  assert.deepEqual(imageSelects[0].props.children.map(option => option.props.value), ['generate', 'edit'])
+  assert.equal(imageSelects[0].props.value, 'edit')
+  const imageNumbers = findAll(imageCard, node => node.type === 'input' && node.props.inputMode === 'numeric')
+  assert.equal(imageNumbers.length, 1)
+  assert.equal(imageNumbers[0].props.value, '120000')
+  assert.equal(switchesOf(imageCard).length, 0)
+  for (const label of ['接口地址（base URL）', '密钥凭据名', '生图模型', '默认端点', '默认尺寸', '默认质量', '输出目录', '超时（毫秒）']) {
+    assert.ok(textOf(imageCard).includes(label), `the image card must render the "${label}" field`)
+  }
 })
 
 test('the MCP card edits one entry per server and refuses a list it cannot run', async () => {
@@ -1044,7 +1082,7 @@ test('groups the cards behind a tablist and follows the selection', async () => 
   const page = renderPage(registered)
   const tabs = tabsOf(page)
   // The selected tab names the panel it controls, and the panel names it back.
-  assert.deepEqual(tabs.map(node => node.props['aria-selected']), [true, false, false, false, false])
+  assert.deepEqual(tabs.map(node => node.props['aria-selected']), [true, false, false, false, false, false])
   const panel = findAll(page, node => node.props.role === 'tabpanel')[0]
   assert.equal(panel.props.id, 'extra-prompt-tabs-prompt-panel')
   assert.equal(panel.props['aria-labelledby'], 'extra-prompt-tabs-prompt')
@@ -1052,7 +1090,7 @@ test('groups the cards behind a tablist and follows the selection', async () => 
   // Switching moves the selection and swaps the panel's contents.
   tabs[3].props.onClick()
   const rtk = renderPage(registered)
-  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false])
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false, false])
   assert.equal(findAll(rtk, node => node.props.role === 'tabpanel')[0].props.id, 'extra-prompt-tabs-rtk-panel')
   assert.equal(findAll(rtk, node => node.props['data-namespace'] === 'extra-rtk-compact').length, 1)
   assert.equal(findAll(rtk, node => node.props['data-namespace'] === 'extra-prompt-injection').length, 0)
@@ -1063,8 +1101,8 @@ test('every group keeps its tab, whatever its row is doing', async () => {
   // page's shape follows the package, not the profile.
   const { registered } = await boot({}, { 'extra-rtk-compact': { status: 'unavailable' } })
   const rtk = renderPage(registered, 'extra-rtk-compact')
-  assert.deepEqual(tabsOf(rtk).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
-  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false])
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'image'])
+  assert.deepEqual(tabsOf(rtk).map(node => node.props['aria-selected']), [false, false, false, true, false, false])
   assert.ok(textOf(rtk).includes(UNAVAILABLE_LABEL))
   // The tab next door renders its fields as usual: one unmounted row is not the
   // whole page.
@@ -1080,13 +1118,14 @@ test('with every row switched off, every card says so and nothing is written', a
     'extra-skill-installer': off,
     'extra-rtk-compact': off,
     'extra-mcp': off,
+    'extra-image-gen': off,
   })
   const tree = renderPage(registered)
   // The default group's card reports the row rather than rendering dead controls.
   assert.ok(textOf(tree).includes(UNAVAILABLE_LABEL))
   assert.equal(saveOf(registered, 'extra-prompt-injection'), undefined)
   // The bar still carries every group...
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'image'])
   // ...and the 技能 group still carries the Skill manager, which is not a row.
   const skill = renderPage(registered, 'extra-skill-installer')
   assert.equal(findAll(skill, node => node.props['data-namespace'] === 'extra-managed-skills').length, 1)
@@ -1377,7 +1416,7 @@ test('an unmounted row reports itself instead of rendering dead controls', async
   assert.equal(saveOf(registered, 'extra-rtk-compact'), undefined, 'nothing to save')
   assert.equal(switchesOf(sectionOf(tree, 'extra-rtk-compact')).length, 0)
   // The group keeps its tab, and the other rows keep their fields.
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'image'])
   const prompt = renderPage(registered, 'extra-prompt-injection')
   assert.equal(findAll(prompt, node => node.type === 'textarea').length, 1)
 })
@@ -1460,7 +1499,7 @@ test('a switched-off row leaves its card uneditable, and the Skill manager besid
   const { registered, forms } = await boot({}, { 'extra-skill-installer': { status: 'unavailable' } })
   const tree = renderPage(registered, 'extra-skill-installer')
   // Its own group is still there: the page does not move when a row does.
-  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp'])
+  assert.deepEqual(tabsOf(tree).map(node => node.props['data-tab']), ['prompt', 'routing', 'skill', 'rtk', 'mcp', 'image'])
   assert.ok(textOf(sectionOf(tree, 'extra-skill-installer')).includes(UNAVAILABLE_LABEL))
   assert.equal(saveOf(registered, 'extra-skill-installer'), undefined)
   // The Skill manager is not a row: it stays reachable in the same group.

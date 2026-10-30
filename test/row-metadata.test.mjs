@@ -117,6 +117,7 @@ test('the patch mounts every row this package ships metadata for', async () => {
     `${manifest.name}/skill-installer`,
     `${manifest.name}/rtk-compact`,
     `${manifest.name}/mcp`,
+    `${manifest.name}/image-gen`,
     `${manifest.name}/settings-api`,
     `${manifest.name}/web-search-tavily`,
   ])
