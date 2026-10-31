@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "图片生成",
-    "description": "提供 image_gen 工具，按配置的模型调用 generate 或 edit 端点生成或编辑图片。"
+    "description": "提供 image_gen 工具，可复用已配置供应商的端点与凭据，支持前台或后台生成/编辑图片。"
   }
 }

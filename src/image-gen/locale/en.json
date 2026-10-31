@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Image generation",
-    "description": "Offers the image_gen tool, generating or editing images through a configurable model and an OpenAI-compatible images endpoint."
+    "description": "Offers the image_gen tool, reusing a configured provider's endpoint and credential when selected, with foreground or background image generation and editing."
   }
 }

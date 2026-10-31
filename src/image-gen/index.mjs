@@ -10,6 +10,10 @@
 // also committed to the attachment store so the picture enters model context and
 // the Web UI can show it beside the call.
 //
+// A call may run in the foreground or as a `ctx.jobs` background task. The
+// background path returns a job id immediately and keeps the same generation,
+// download, disk and attachment work, so `job_output` sees the saved paths.
+//
 // The feature's on/off switch is the profile row's own: disabling
 // `extra-image-gen` in the 「插件」 page disposes the fiber and the tool
 // registration with it, which is what removes `image_gen` from the model's tool
@@ -80,7 +84,7 @@ export const Config = Schema.object({
     .volatile(),
 })
 
-/** An AbortError-shaped failure for a cancelled call. */
+/** An AbortError-shaped failure for a cancelled foreground/background call. */
 function abortError() {
   const error = new Error('image generation aborted')
   error.name = 'AbortError'
@@ -265,14 +269,16 @@ function resultLines(value) {
 /**
  * Run one image generation to completion.
  *
- * Keeping the API call, download, disk write and attachment commit in one place
- * gives the tool one implementation for every caller.
+ * The tool's foreground path and its background job share this function; only
+ * the cancellation signal differs. Keeping the API call, download, disk write
+ * and attachment commit here means a background result is the same artifact a
+ * foreground call would produce.
  *
  * @param ctx - plugin context.
  * @param config - live settings namespace.
  * @param args - validated tool arguments.
  * @param exec - the originating tool execution, for session cwd and agent facts.
- * @param outerSignal - cancellation from the caller.
+ * @param outerSignal - cancellation from the caller or background job.
  * @returns the completed generation.
  */
 async function generateImage(ctx, config, args, exec, outerSignal) {
@@ -414,7 +420,7 @@ export function apply(ctx, config) {
   // all, so there is no registration cycle to rebuild for.
   const tool = defineTool({
     name: TOOL_NAME,
-    description: 'Generate a new image or edit existing images through the configured OpenAI-compatible image API, saving the result to disk. Pass `images` (local paths or http(s) URLs) to edit; without images the configured default endpoint is used (generate unless changed in settings).',
+    description: 'Generate a new image or edit existing images through the configured OpenAI-compatible image API, saving the result to disk. Pass `images` (local paths or http(s) URLs) to edit; without images the configured default endpoint is used (generate unless changed in settings). Set `run_in_background: true` for a long generation: the call returns a job id immediately; collect it with `job_output` and stop it with `job_kill`.',
     parameters: {
       prompt: {
         type: 'string',
@@ -447,44 +453,65 @@ export function apply(ctx, config) {
         type: 'integer',
         description: 'How many images to request; omitted sends one.',
       },
+      run_in_background: {
+        type: 'boolean',
+        description: 'Run as a background job and return its job id immediately; collect with job_output or stop with job_kill. Defaults to false.',
+      },
     },
     output: {
       schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          mode: { type: 'string', enum: ['generate', 'edit'], required: true },
-          model: { type: 'string', required: true },
-          images: {
-            type: 'array',
-            required: true,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                path: { type: 'string', required: true },
-                mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
-                bytes: { type: 'integer', required: true },
-                revisedPrompt: { type: 'string' },
-                attachment: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              jobId: { type: 'string', required: true },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['generate', 'edit'], required: true },
+              model: { type: 'string', required: true },
+              images: {
+                type: 'array',
+                required: true,
+                items: {
                   type: 'object',
                   additionalProperties: false,
                   properties: {
-                    attachmentId: { type: 'string', required: true },
-                    mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'], required: true },
+                    path: { type: 'string', required: true },
+                    mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
                     bytes: { type: 'integer', required: true },
-                    width: { type: 'integer' },
-                    height: { type: 'integer' },
-                    name: { type: 'string' },
+                    revisedPrompt: { type: 'string' },
+                    attachment: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        attachmentId: { type: 'string', required: true },
+                        mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'], required: true },
+                        bytes: { type: 'integer', required: true },
+                        width: { type: 'integer' },
+                        height: { type: 'integer' },
+                        name: { type: 'string' },
+                      },
+                    },
                   },
                 },
               },
+              warnings: { type: 'array', required: true, items: { type: 'string' } },
             },
           },
-          warnings: { type: 'array', required: true, items: { type: 'string' } },
-        },
+        ],
       },
       render: (_args, value) => {
+        if (typeof value.jobId === 'string') {
+          return [{
+            type: 'text',
+            text: `started background ${TOOL_NAME} job ${value.jobId}; collect its result with job_output`,
+          }]
+        }
         const lines = resultLines(value)
         const blocks = [{ type: 'text', text: lines.join('\n') }]
         for (const image of value.images) {
@@ -505,13 +532,45 @@ export function apply(ctx, config) {
         throw new Error(`${TOOL_NAME}: 生图模型未配置，请先在「设置 → 提示词与技能 → 图片生成」里填写模型`)
       }
 
+      if (args.run_in_background === true) {
+        const jobs = ctx.get('jobs')
+        if (jobs === undefined || typeof jobs.start !== 'function') {
+          throw new Error(`${TOOL_NAME}: 后台任务不可用，请加载 @deepseek-ai/dsh-jobs 和 @deepseek-ai/dsh-tool-jobs`)
+        }
+        if (exec.signal?.aborted === true) {
+          throw abortError()
+        }
+        const controller = new AbortController()
+        const owner = exec.agent?.id
+        const jobId = jobs.start({
+          kind: 'image_gen',
+          label: promptLine(prompt),
+          ...owner === undefined ? {} : { owner },
+          run: () => {
+            const work = generateImage(ctx, config, args, exec, controller.signal)
+            return {
+              cancel: reason => controller.abort(reason ?? 'background image_gen task killed'),
+              done: work.then(
+                value => ({ status: 'completed', result: resultLines(value).join('\n') }),
+                error => ({
+                  status: controller.signal.aborted ? 'killed' : 'failed',
+                  detail: error instanceof Error ? error.message : String(error),
+                }),
+              ),
+            }
+          },
+        })
+        return { jobId }
+      }
+
       return generateImage(ctx, config, args, exec, exec.signal)
     },
     presentCall(args) {
       const preview = promptLine(args.prompt)
+      const background = args.run_in_background === true
       return {
         card: 'generic',
-        title: `${args.mode === 'edit' || (args.mode === undefined && (args.images?.length ?? 0) > 0) ? 'Edit image' : 'Generate image'}: ${preview}`,
+        title: `${background ? 'Background image' : args.mode === 'edit' || (args.mode === undefined && (args.images?.length ?? 0) > 0) ? 'Edit image' : 'Generate image'}: ${preview}`,
         kind: 'other',
       }
     },

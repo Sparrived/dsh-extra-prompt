@@ -9,7 +9,7 @@
 | Skill 安装 | 提供 `skill-install` 工具，从 git 或压缩包安装 Skill 到当前 profile | `extra-skill-installer` |
 | rtk 输出压缩 | 对 `git status` / `git diff` / `git log` / `rg` / `grep` 的输出做压缩 | `extra-rtk-compact` |
 | MCP 服务器 | 每台服务器组合一个官方 `dsh-mcp-client` 实例，它的工具以 `mcp__<服务器名>__<工具名>` 交给模型 | `extra-mcp` |
-| 图片生成 | 提供 `image_gen` 工具，按配置的模型调用 generate/edit 端点生成或编辑图片 | `extra-image-gen` |
+| 图片生成 | 提供 `image_gen` 工具，按配置的模型调用 generate/edit 端点生成或编辑图片，支持前台或后台任务 | `extra-image-gen` |
 
 设置页另有一张不属于任何配置命名空间的卡片：**模型可见的 Skills**。它列出模型当前真正能读取到的 Skill（工作区与用户级目录、自定义与内置目录、插件运行期 Skill），并允许卸载本包装过的那些（数据来自一个 `/api` 路由，见下）。
 
@@ -146,7 +146,9 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 
 `image_gen` 是一个会向外发请求、再把结果写到磁盘的工具。它不自己实现生图，只把调用转给设置里配置的 OpenAI 兼容 images 接口：没有参考图时走 `POST /images/generations`（JSON），给了参考图时走 `POST /images/edits`（multipart）。接口形状跟 OpenAI 走，是因为 GPUStack、vLLM、one-api 这类兼容网关都实现这一套，换一个服务商只需要改 `baseURL`、`model` 与凭据名。
 
-端点不是写死的：显式 `mode` 优先；没有 `mode` 但有 `images` 时自动走 edit（服务商没有输入图也做不了编辑，这一点不该让模型自己记住）；两者都没有才用设置里的默认端点。参数是 `prompt`（必填）、`mode`、`images`（本地路径或 http(s) URL，绝对路径或相对会话 cwd）、`mask`（仅 edit，形式同 `images`）、`size`、`quality`、`n`。`size` / `quality` 不填就用设置里的默认值，两者都为空时不发这个字段；`n` 不填只请求一张，只有大于 1 才发送。`edit` 至少要有一张参考图，缺了直接报错，而不是把一次注定失败的请求发给服务商。
+设置页的「供应商」下拉会列出当前 DSH 已配置的 LLM 供应商（来自 `ctx.llm.listConfigurableProviders()` 与 `ctx.settings` 的解析结果）。选择一个供应商后，它会直接复用该供应商的 `baseURL` 和 `apiKeyEnv`，图片卡片里手动填写的端点/凭据字段会自动隐藏；清除供应商选择后，这两个字段恢复显示并继续作为手动配置使用。供应商本身必须提供 OpenAI 兼容的 images 接口；这里只负责复用路由，不改变它的协议。选择已删除的供应商会明确报错，而不是悄悄退回旧的手动地址。
+
+端点不是写死的：显式 `mode` 优先；没有 `mode` 但有 `images` 时自动走 edit（服务商没有输入图也做不了编辑，这一点不该让模型自己记住）；两者都没有才用设置里的默认端点。参数是 `prompt`（必填）、`mode`、`images`（本地路径或 http(s) URL，绝对路径或相对会话 cwd）、`mask`（仅 edit，形式同 `images`）、`size`、`quality`、`n`。`size` / `quality` 不填就用设置里的默认值，两者都为空时不发这个字段；`n` 不填只请求一张，只有大于 1 才发送。`run_in_background: true` 会把整次生成交给 `ctx.jobs`，立即返回 job id；之后用 `job_output` 取保存路径和警告，用 `job_kill` 取消。`edit` 至少要有一张参考图，缺了直接报错，而不是把一次注定失败的请求发给服务商。
 
 结果先落盘，工具返回的是**绝对路径**，并附上 media type 与字节数（进入附件时还有尺寸和服务商回的修订提示词）。当前模型路由声明了 `image` 输入、且宿主提供附件存储时，图片还会存进会话附件随工具结果一起回传，模型能直接读到；路由能力未知或只收文本时只回路径——文件已经写好了，没必要为了一张图让整段会话无法继续。支持 png / jpeg / webp / gif，类型按字节的 magic bytes 判定，不信 `content-type` 和扩展名；不认识的格式仍然落盘，只是不进附件。文件名是 `image-<UTC 时间戳>-<随机段>-<序号>.<扩展名>`：UTC 让名字不随夏令时跳变，随机段分开同一秒内的两次调用，序号分开同一次调用的多张图；写入用 `wx`，同名不会被覆盖，冲突会直接报错。单张上限 64MB，下载时同时看 `content-length` 与实际字节。HTTP 错误、超时、应答里没有图片都会作为工具错误明确报出，并带上服务商的 `error.message`；超时单独说「请求超时（N 毫秒）」。
 
@@ -163,7 +165,7 @@ dsh --profile <profile> --no-open        # 启动时不应有 "did not activate"
 - **注册表记录不会因为读不到目录而消失**：目录被手工删掉（或 `SKILL.md` 不再可解析）的受管记录会作为「受管记录」单列一行，带上宿主给的原因，这样一条只存在于隐藏文件里的记录仍然看得见、清得掉。
 - **profile 没挂载时降级，而不是整张卡失败**：拿不到受管注册表只意味着「不知道哪些是本包装的」，Skill 名单照常给出，原因作为一句话显示在卡片上。
 
-这张卡片的 Skill 数据不是配置、读不到任何命名空间里，所以走的是本包自己的 `/api` 路由 `POST /api/extra-prompt`（`{op:'skills/list'}` / `{op:'skills/remove'}`）。同一个路由还回答第二个问题 `{op:'rtk/status', rtkPath}`：这台机器上有没有 `rtk`（见 `extra-rtk-compact` 一节）。几个问题都是「页面读不到、只有宿主知道」的事实，而不是配置——这条路由从不写任何配置，所有设置写入仍然走 `configForms`。
+这张卡片的 Skill 数据不是配置、读不到任何命名空间里，所以走的是本包自己的 `/api` 路由 `POST /api/extra-prompt`（`{op:'skills/list'}` / `{op:'skills/remove'}`）。同一个路由还回答另外两个问题：`{op:'rtk/status', rtkPath}`（这台机器上有没有 `rtk`，见 `extra-rtk-compact` 一节）和 `{op:'image/providers'}`（图片卡片可复用的 DSH 供应商列表）。几个问题都是「页面读不到、只有宿主知道」的事实，而不是配置——这条路由从不写任何配置，所有设置写入仍然走 `configForms`。
 
 **为什么不用 `connection.rpc.handle()` 建一条 JSON 通道**：那个方法内部会通过**调用方 context** 去取 `webServer`（`packages/client/connection/src/rpc-host.ts` 的 `register()` 写的是 `owner.webServer.register(route)`），而属于「只声明了这个服务的插件」的 context 走不到那一步——它在 isolate 边界停下并抛 `cannot get property "webServer" without inject`，无论这一行 `inject` 里写什么（`['connection']`、`['connection','webServer']` 都试过）。`connection.fetch.register()` 不碰 `webServer`：它把路由登记进共享的 `/api` 表，由 Connection 自己的 `/api` 路由在受信主机检查与浏览器会话认证**之后**转发，因此这条路由是普通的同源已认证 POST，浏览器半边用 `fetch` 带 cookie 调它。实测 `POST /api/extra-prompt {"op":"ping"}` 返回 `{"ok":true,"value":{"pong":true}}`。
 
@@ -233,6 +235,7 @@ DSH 里插件配置的**规范位置**是 Plugins 页的 `plugins.row.config`（
 
 | 字段 | 类型 | 默认 |
 | --- | --- | --- |
+| `provider` | 供应商下拉 | 空（手动配置） |
 | `baseURL` | 文本 | `https://api.openai.com/v1` |
 | `apiKeyEnv` | 文本（凭据引用） | `IMAGE_API_KEY` |
 | `model` | 文本 | 空（未配置时工具直接报错） |
@@ -241,6 +244,8 @@ DSH 里插件配置的**规范位置**是 Plugins 页的 `plugins.row.config`（
 | `quality` | 文本 | 空（不发送） |
 | `outputDir` | 文本 | 空（`<DSH_HOME>/generated-images`） |
 | `timeoutMs` | 数字 | `120000` |
+
+`provider` 选择的是 DSH 已经配置好的 LLM 供应商；选中后工具在每次调用时读取该供应商的 `baseURL` 与 `apiKeyEnv`，并把手动字段隐藏。它不复制密钥本身，只复用凭据引用；供应商没有端点时会明确报错，不会偷偷借用旧的手动地址。清除供应商选择后，手动 `baseURL` / `apiKeyEnv` 恢复显示并重新生效。`model` 仍是独立字段，因为生图模型往往不在该供应商的文本模型目录里。
 
 `model` 是发给服务商的模型名（例如 `gpt-image-1`），留空时工具直接报错；`size` / `quality` 是每次调用的默认值，留空则不发送该字段（空字符串与「用服务商默认」不是一回事）。`apiKeyEnv` 是**引用**而不是密钥：这里写凭据名或环境变量名，调用时由 `ctx.credentials` 解析（解析不到再看进程环境），密钥本身不进设置文档；本地网关不需要密钥时留空。`baseURL` 接受服务根、以 `/images` 结尾的目录或完整端点，完整端点会被改写成当前调用的那个端点，所以从服务商文档里复制哪一种都能用。`outputDir` 留空落在 `<DSH_HOME>/generated-images`，相对路径按会话 cwd 解析，`~` 会展开。`endpoint` 只是「没有参考图且没显式传 `mode`」时的默认值：显式 `mode` 始终优先，有参考图则自动走 edit。`timeoutMs` 同时管请求本身的超时。
 
@@ -321,11 +326,11 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 npm test          # 等价于 node --test "test/**/*.test.mjs"
 ```
 
-124 个用例，分三层：
+133 个用例，分三层：
 
-- **宿主层（83）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属，以及 `test/image-gen-model.test.mjs` 覆盖的图片生成协议：端点 URL、模式选择、generate JSON 体、edit multipart、base64 与 url 两种应答、错误应答、magic bytes 与文件名），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
+- **宿主层（91）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属，以及 `test/image-gen-model.test.mjs` 覆盖的图片生成协议：端点 URL、模式选择、generate JSON 体、edit multipart、base64 与 url 两种应答、错误应答、magic bytes 与文件名；`test/image-gen-providers.test.mjs` 覆盖供应商目录解析、目录默认端点与严格供应商端点选择），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
 - **行显示元数据（4）**：`test/row-metadata.test.mjs` 从 `cordis.patch.yml` 读出每一行，再按宿主 `readPluginMeta` 的同一套规则解析它的资源——`<行>/package.json` 与 `<行>/locale/en.json` 必须能通过 package exports 解析到、locale 文件名必须是语言 id、中英标题与说明都必须非空且互不相同（否则一页会显示另一页的语言）、图标必须是目录内的相对路径且类型与 256 KiB 都合规、SVG 要带 `viewBox` 且自包含；最后核对 `files` 确实包含这些文件（`link:` 安装看不出漏项，发布出去才知道）。
-- **浏览器半边（37）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、六个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
+- **浏览器半边（38）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、六个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、图片卡片的供应商下拉能读取并暂存选择且选中时隐藏/清除时恢复手动端点字段、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
 
 其中三条值得单独说：
 
