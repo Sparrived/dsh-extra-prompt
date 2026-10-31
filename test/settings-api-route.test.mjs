@@ -225,3 +225,35 @@ test('a Host without a skills registry still reports what this package installed
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+test('the image card can list the provider routes already configured in DSH', async () => {
+  const { ctx, routes } = contextOf({
+    llm: {
+      listConfigurableProviders: () => [{
+        provider: 'amkr',
+        displayName: 'AMKR 网关',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'amkr'],
+      }],
+    },
+    settings: {
+      get: ns => (ns === 'llm-pi-ai'
+        ? { providers: { amkr: { baseURL: 'https://amkr.example/v1', apiKeyEnv: 'AMKR_API_KEY' } } }
+        : undefined),
+    },
+  });
+  apply(ctx);
+
+  const { status, body } = await post(routes[0], { op: 'image/providers' });
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.value.providers, [{
+    provider: 'amkr',
+    displayName: 'AMKR 网关',
+    baseURL: 'https://amkr.example/v1',
+    apiKeyEnv: 'AMKR_API_KEY',
+    models: [],
+  }]);
+  // The route exposes the credential reference, never a credential value.
+  assert.equal(JSON.stringify(body).includes('secret'), false);
+});

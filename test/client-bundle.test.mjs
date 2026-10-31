@@ -835,6 +835,7 @@ test('renders every declared field for every namespace', async () => {
     'extra-rtk-compact': { rtkPath: '', minBodyChars: 1200, timeoutMs: 20000, maxOutputBytes: 4194304, gitStatus: true, gitDiff: true, gitLog: true, rg: true, grep: true },
     'extra-subagent-routing': { routes: [{ provider: 'deepseek-official', model: 'deepseek-v4-pro', note: '疑难推理' }], guidance: '' },
     'extra-image-gen': {
+      provider: 'amkr',
       baseURL: 'https://api.openai.com/v1',
       apiKeyEnv: 'IMAGE_API_KEY',
       model: 'gpt-image-1',
@@ -843,6 +844,21 @@ test('renders every declared field for every namespace', async () => {
       quality: 'high',
       outputDir: '',
       timeoutMs: 120000,
+    },
+  })
+
+  // The image card reads the already configured DSH providers from the page's
+  // data channel when it mounts; the answer is what fills the provider picker.
+  apiAnswers.set('image/providers', {
+    ok: true,
+    value: {
+      providers: [{
+        provider: 'amkr',
+        displayName: 'AMKR 网关',
+        baseURL: 'https://amkr.example/v1',
+        apiKeyEnv: 'AMKR_API_KEY',
+        models: [],
+      }],
     },
   })
 
@@ -899,29 +915,94 @@ test('renders every declared field for every namespace', async () => {
   assert.ok(textOf(mcp).includes('添加服务器'))
   assert.equal(findAll(mcp, node => node.props.className === 'dsh-extra-server').length, 0)
 
-  // The image group: one card carries all eight fields — six single-line text
-  // inputs, the default-endpoint enum and the numeric timeout — and no switch of
-  // its own, because the feature's on/off is its row.
+  // The image group: selecting the provider hides the two manual endpoint fields,
+  // leaving four single-line text inputs, two enums (provider and endpoint) and
+  // the numeric timeout. The feature's on/off is its row, not a field here.
+  renderPage(registered, 'extra-image-gen')
+  await settle()
   const image = renderPage(registered, 'extra-image-gen')
   assert.equal(findAll(image, node => node.props['data-namespace'] === 'extra-image-gen').length, 1)
   const imageCard = sectionOf(image, 'extra-image-gen')
   const imageText = findAll(imageCard, node => node.type === 'input' && node.props.inputMode !== 'numeric')
-  assert.equal(imageText.length, 6)
-  assert.deepEqual(imageText.map(node => node.props.value), [
-    'https://api.openai.com/v1', 'IMAGE_API_KEY', 'gpt-image-1', '1024x1024', 'high', '',
-  ])
-  assert.equal(imageText[0].props.placeholder, 'https://api.openai.com/v1')
+  assert.equal(imageText.length, 4)
+  assert.deepEqual(imageText.map(node => node.props.value), ['gpt-image-1', '1024x1024', 'high', ''])
+  assert.equal(imageText[0].props.placeholder, 'gpt-image-1')
   const imageSelects = findAll(imageCard, node => node.type === 'select')
-  assert.equal(imageSelects.length, 1)
-  assert.deepEqual(imageSelects[0].props.children.map(option => option.props.value), ['generate', 'edit'])
-  assert.equal(imageSelects[0].props.value, 'edit')
+  assert.equal(imageSelects.length, 2)
+  assert.deepEqual(imageSelects[0].props.children.map(option => option.props.value), ['', 'amkr'])
+  assert.equal(imageSelects[0].props.value, 'amkr')
+  assert.deepEqual(imageSelects[1].props.children.map(option => option.props.value), ['generate', 'edit'])
+  assert.equal(imageSelects[1].props.value, 'edit')
+  assert.ok(textOf(imageCard).includes('将复用端点：https://amkr.example/v1；凭据：AMKR_API_KEY'))
   const imageNumbers = findAll(imageCard, node => node.type === 'input' && node.props.inputMode === 'numeric')
   assert.equal(imageNumbers.length, 1)
   assert.equal(imageNumbers[0].props.value, '120000')
   assert.equal(switchesOf(imageCard).length, 0)
-  for (const label of ['接口地址（base URL）', '密钥凭据名', '生图模型', '默认端点', '默认尺寸', '默认质量', '输出目录', '超时（毫秒）']) {
+  for (const label of ['供应商', '生图模型', '默认端点', '默认尺寸', '默认质量', '输出目录', '超时（毫秒）']) {
     assert.ok(textOf(imageCard).includes(label), `the image card must render the "${label}" field`)
   }
+  assert.equal(textOf(imageCard).includes('接口地址（base URL）'), false)
+  assert.equal(textOf(imageCard).includes('密钥凭据名'), false)
+})
+
+test('the image provider picker hides the manual endpoint while a provider is selected', async () => {
+  const { registered, forms } = await boot({
+    'extra-image-gen': {
+      provider: '',
+      baseURL: 'https://api.openai.com/v1',
+      apiKeyEnv: 'IMAGE_API_KEY',
+      model: 'gpt-image-1',
+      endpoint: 'generate',
+      size: '',
+      quality: '',
+      outputDir: '',
+      timeoutMs: 120000,
+    },
+  })
+  apiAnswers.set('image/providers', {
+    ok: true,
+    value: {
+      providers: [{
+        provider: 'amkr',
+        displayName: 'AMKR 网关',
+        baseURL: 'https://amkr.example/v1',
+        apiKeyEnv: 'AMKR_API_KEY',
+        models: [],
+      }],
+    },
+  })
+
+  renderPage(registered, 'extra-image-gen')
+  await settle()
+  const before = sectionOf(renderPage(registered, 'extra-image-gen'), 'extra-image-gen')
+  const textInputs = card => findAll(card, node => node.type === 'input' && node.props.inputMode !== 'numeric')
+  assert.equal(textInputs(before).length, 6)
+  assert.ok(textOf(before).includes('接口地址（base URL）'))
+  assert.ok(textOf(before).includes('密钥凭据名'))
+
+  const picker = findAll(before, node => node.type === 'select')[0]
+  picker.props.onChange({ target: { value: 'amkr' } })
+
+  const after = sectionOf(renderPage(registered, 'extra-image-gen'), 'extra-image-gen')
+  assert.equal(textInputs(after).length, 4)
+  assert.equal(textOf(after).includes('接口地址（base URL）'), false)
+  assert.equal(textOf(after).includes('密钥凭据名'), false)
+
+  const clearPicker = findAll(after, node => node.type === 'select')[0]
+  clearPicker.props.onChange({ target: { value: '' } })
+  const cleared = sectionOf(renderPage(registered, 'extra-image-gen'), 'extra-image-gen')
+  assert.equal(textInputs(cleared).length, 6)
+  assert.ok(textOf(cleared).includes('接口地址（base URL）'))
+  assert.ok(textOf(cleared).includes('密钥凭据名'))
+
+  const reselect = findAll(cleared, node => node.type === 'select')[0]
+  reselect.props.onChange({ target: { value: 'amkr' } })
+
+  const save = saveOf(registered, 'extra-image-gen')
+  assert.equal(save.props.disabled, false)
+  save.props.onClick()
+  await settle()
+  assert.deepEqual(forms['extra-image-gen'].calls, [{ op: 'set', field: 'provider', value: 'amkr' }])
 })
 
 test('the MCP card edits one entry per server and refuses a list it cannot run', async () => {

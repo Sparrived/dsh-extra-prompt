@@ -1,10 +1,11 @@
 // The settings page's data channel.
 //
-// The page shows three things that are not configuration and cannot be read from a
+// The page shows things that are not configuration and cannot all be read from a
 // config namespace: the Skills the model can actually read, which of them this
-// package installed (a file next to the profile written by `skill-installer`), and
-// whether this machine has the `rtk` executable at all. The browser cannot read any
-// of them.
+// package installed (a file next to the profile written by `skill-installer`),
+// whether this machine has the `rtk` executable at all, and the provider routes
+// already configured in DSH (for the image card's provider picker). The browser
+// cannot read any of them.
 //
 // The Skill list is answered by the Host's own `skills` registry — the one the
 // `skill` tool and the per-step catalog read — queried once per mounted workspace,
@@ -37,6 +38,7 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveDshHome, resolveDshProfileDir } from '../shared/dsh-home.mjs';
 import { listManagedSkills, uninstallManagedSkill } from '../skill-installer/manage.mjs';
+import { listConfiguredProviders } from '../image-gen/providers.mjs';
 import { assembleSkillCatalog } from './catalog.mjs';
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -314,6 +316,10 @@ async function rtkStatus(ctx, configured) {
 function operationsOf(ctx) {
   return {
     ping: () => ({ ok: true, value: { pong: true } }),
+    'image/providers': () => ({
+      ok: true,
+      value: { providers: listConfiguredProviders(ctx) },
+    }),
     'rtk/status': async (body) => {
       const configured = typeof body.rtkPath === 'string' ? body.rtkPath.trim() : '';
       return { ok: true, value: await rtkStatus(ctx, configured) };
