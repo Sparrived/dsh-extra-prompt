@@ -1,9 +1,12 @@
 // Host plugin: global prompt injection.
 //
 // The user writes one piece of standing text in settings and this plugin appends
-// it as its own `user/message` before the next step of every session. It is not
-// merged into the system prompt, so it stays separately visible in the session
-// trajectory and is attributed to this plugin's own source kind.
+// it as its own `user/message` before the next step of every session. The text is
+// delivered inside a `<system-reminder>` block that the plugin adds itself, so
+// the setting holds only the body and a hand-written block from older settings is
+// not wrapped twice. It is not merged into the system prompt, so it stays
+// separately visible in the session trajectory and is attributed to this
+// plugin's own source kind.
 //
 // An empty text appends nothing, so clearing the field is itself a switch for
 // the injection. The feature's on/off switch is the profile row's own: the
@@ -29,9 +32,9 @@ import { injectionMessage, isInjectionSource, nextInjection, PROMPT_NAMESPACE } 
 
 export const name = PROMPT_NAMESPACE
 
-/** Live-editable injected text; `role('textarea')` renders it multi-line. */
+/** Live-editable injected body; `role('textarea')` renders it multi-line. */
 export const Config = Schema.object({
-  text: Schema.string().role('textarea').description('Injected before every Session step as its own context message').default('').volatile(),
+  text: Schema.string().role('textarea').description('Injected before every Session step as its own system-reminder context message').default('').volatile(),
 })
 
 /**

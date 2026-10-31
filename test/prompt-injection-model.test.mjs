@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { CLEARED_INJECTION, PROMPT_NAMESPACE, injectionMessage, isInjectionSource, nextInjection } from '../src/prompt-injection/model.mjs'
+import { CLEARED_INJECTION, PROMPT_NAMESPACE, injectionBody, injectionMessage, isInjectionSource, nextInjection, systemReminderBlock } from '../src/prompt-injection/model.mjs'
 
 test('injects nothing on the first step when the setting is absent or blank', () => {
   assert.equal(nextInjection(null, undefined), undefined)
@@ -42,14 +42,44 @@ test('a new text after clearing is injected again, and so is the same text later
 
 test('the injected message declares its own producer kind instead of the retired plugin wrapper', () => {
   const message = injectionMessage('总是先跑测试', PROMPT_NAMESPACE)
+  const block = '<system-reminder>\n\n总是先跑测试\n\n</system-reminder>'
   // 会话格式 v4 拒绝共享的 `plugin` 来源：写这样一条消息会让落盘直接抛
   // `format v4 message requires a producer-owned source kind`，整个 Session 无法运行。
   assert.equal(message.source.kind, PROMPT_NAMESPACE)
   assert.equal(Object.hasOwn(message.source, 'plugin'), false)
   // 快照形态与 DSH 自身的运行时上下文一致，轨迹据此显示成一条注入行。
   assert.equal(message.source.form, 'snapshot')
-  assert.deepEqual(message.source.sections, [{ name: PROMPT_NAMESPACE, text: '总是先跑测试' }])
-  assert.deepEqual(message.content, [{ type: 'text', text: '总是先跑测试' }])
+  assert.deepEqual(message.source.sections, [{ name: PROMPT_NAMESPACE, text: block }])
+  assert.deepEqual(message.content, [{ type: 'text', text: block }])
+})
+
+test('wraps the injection body in a system-reminder block automatically', () => {
+  assert.equal(systemReminderBlock('总是先跑测试'), '<system-reminder>\n\n总是先跑测试\n\n</system-reminder>')
+  // 注入的是用户正文本身；块只由插件添加一次。
+  assert.equal(injectionBody('<system-reminder>\n\n总是先跑测试\n\n</system-reminder>'), '总是先跑测试')
+  assert.equal(injectionBody('总是先跑测试'), '总是先跑测试')
+})
+
+test('does not wrap a hand-written block a second time', () => {
+  const handWritten = '<system-reminder>\n\n旧的注入\n\n</system-reminder>'
+  assert.equal(systemReminderBlock(handWritten), handWritten)
+  // 旧配置（带手写块）与新配置（纯正文）在比较时被视为同一个正文。
+  assert.equal(nextInjection(null, handWritten), '旧的注入')
+  assert.equal(nextInjection(handWritten, '旧的注入'), undefined)
+})
+
+test('recognises an already-delivered wrapped injection as unchanged', () => {
+  // 注入写进会话后带上了插件添加的块；下一步不能因为它和配置的纯正文不同就重复注入。
+  assert.equal(nextInjection('<system-reminder>\n\n旧的注入\n\n</system-reminder>', '旧的注入'), undefined)
+  assert.equal(
+    nextInjection(`<system-reminder>\n\n${CLEARED_INJECTION}\n\n</system-reminder>`, ''),
+    undefined,
+  )
+})
+
+test('the clearing notice is delivered inside the same block', () => {
+  const [block] = injectionMessage(CLEARED_INJECTION, PROMPT_NAMESPACE).content
+  assert.equal(block.text, `<system-reminder>\n\n${CLEARED_INJECTION}\n\n</system-reminder>`)
 })
 
 test('recognizes its own rows both before and after the v3 to v4 source migration', () => {

@@ -4,7 +4,7 @@
 
 | 能力 | 作用 | 行 id |
 | --- | --- | --- |
-| 全局提示词注入 | 在每个 Session step 之前注入一段固定上下文 | `extra-prompt-injection` |
+| 全局提示词注入 | 在每个 Session step 之前注入一段固定上下文，并自动包成 `system-reminder` 块 | `extra-prompt-injection` |
 | 子代理路由 | 把「什么任务交给哪个 provider/model」写进系统提示，并附上使用说明 | `extra-subagent-routing` |
 | Skill 安装 | 提供 `skill-install` 工具，从 git 或压缩包安装 Skill 到当前 profile | `extra-skill-installer` |
 | rtk 输出压缩 | 对 `git status` / `git diff` / `git log` / `rg` / `grep` 的输出做压缩 | `extra-rtk-compact` |
@@ -185,7 +185,7 @@ DSH 里插件配置的**规范位置**是 Plugins 页的 `plugins.row.config`（
 | --- | --- | --- |
 | `text` | 多行文本 | 空 |
 
-清空文本 = 不注入；同一会话里清空还会追加一条「不再适用」的说明（`CLEARED_INJECTION`），因为已经注入的内容是会话历史，不会被改写。
+字段里只写正文，插件会自动套上 `<system-reminder>` 块再注入；旧配置里已经手写过这个块的文本会被识别，不会重复包裹。清空文本 = 不注入；同一会话里清空还会追加一条「不再适用」的说明（`CLEARED_INJECTION`），因为已经注入的内容是会话历史，不会被改写。
 
 **extra-subagent-routing**
 
@@ -326,9 +326,9 @@ window.__ModuleLoader__.load({ id: 'dsh-extra-prompt', factory: (require) => { �
 npm test          # 等价于 node --test "test/**/*.test.mjs"
 ```
 
-133 个用例，分三层：
+137 个用例，分三层：
 
-- **宿主层（91）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属，以及 `test/image-gen-model.test.mjs` 覆盖的图片生成协议：端点 URL、模式选择、generate JSON 体、edit multipart、base64 与 url 两种应答、错误应答、magic bytes 与文件名；`test/image-gen-providers.test.mjs` 覆盖供应商目录解析、目录默认端点与严格供应商端点选择），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
+- **宿主层（95）**：纯函数模型（提示词组装、rtk 过滤规则、路由说明渲染、MCP 服务器文档的规范化/校验/`specOf`/`specKey`、目录说明的写入与收回、Skill 名单的合并与受管记录归属，以及 `test/image-gen-model.test.mjs` 覆盖的图片生成协议：端点 URL、模式选择、generate JSON 体、edit multipart、base64 与 url 两种应答、错误应答、magic bytes 与文件名；`test/image-gen-providers.test.mjs` 覆盖供应商目录解析、目录默认端点与严格供应商端点选择），安装器（真实临时目录，含「没有挂载 profile 时仍能安装但不记录来源」的路径），以及设置路由的端到端（`apply()` 挂在一个 context 替身上，然后发出浏览器真正会发的那条 POST，配真注册表与临时 profile）。
 - **行显示元数据（4）**：`test/row-metadata.test.mjs` 从 `cordis.patch.yml` 读出每一行，再按宿主 `readPluginMeta` 的同一套规则解析它的资源——`<行>/package.json` 与 `<行>/locale/en.json` 必须能通过 package exports 解析到、locale 文件名必须是语言 id、中英标题与说明都必须非空且互不相同（否则一页会显示另一页的语言）、图标必须是目录内的相对路径且类型与 256 KiB 都合规、SVG 要带 `viewBox` 且自包含；最后核对 `files` 确实包含这些文件（`link:` 安装看不出漏项，发布出去才知道）。
 - **浏览器半边（38）**：在 `node:vm` 里执行真实的 `lib/client.js`，用一个最小 React 替身和一套按官方 prop 契约写的组件替身渲染，断言它注册到 `settings.section`、注册的命名空间与 `package.json` 导出一致、页头写的包名版本与 `package.json` 一致且点明开关在「插件」页、样式只走 `--dsw-*` 令牌、渲染出所有声明的字段、页面上没有任何功能开关（`enabled` 卡片已不存在）、六个分组始终在标签栏里、行未挂载时卡片显示「这一行没有挂载」而其余卡片照常、图片卡片的供应商下拉能读取并暂存选择且选中时隐藏/清除时恢复手动端点字段、保存只写被编辑过的字段并在被接受后清空草稿、宿主拒写时保留草稿、空数字走 `unset`、低于 schema 下限的数字与缺 provider/model 的路由行都会阻止保存、只读时禁用保存、子代理路由的白名单交叉检查（不一致时点名缺哪些路由、一致时不说话、命名空间未挂载时不猜、并且从不写那份文档）、MCP 卡片每条错误只说一次且只把同类控件并排，以及 rtk 卡片在「问不到 / 答不出 / 答没有 / 答有」四种回答下的那一行机器说明。
 

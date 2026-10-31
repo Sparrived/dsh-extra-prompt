@@ -1,5 +1,5 @@
 {
   "name": "extra-prompt-injection",
-  "description": "Injects one standing context message before every Session step.",
+  "description": "Injects one standing system-reminder context block before every Session step.",
   "icon": "./icon.svg"
 }
